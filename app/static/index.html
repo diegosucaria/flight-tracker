@@ -136,7 +136,11 @@
             </div>
 
             <div style="height:1px;background:var(--line);margin:6px 0 10px"></div>
-            <span class="field-label" style="display:block;margin-bottom:6px">Watch sector</span>
+            <span class="field-label" style="display:block;margin-bottom:2px">Watch sector</span>
+            <small class="muted" style="display:block;margin:0 0 6px;font-weight:400;line-height:1.45">
+              The sky you monitor. <b>Center</b> = compass bearing it faces; <b>Half-angle</b> = &frac12; its width
+              (180 = full circle, 90 = half-circle, 30 = a 60&deg; wedge). <b>Min/Max km</b> = distance band.
+            </small>
 
             <div class="form-row two">
               <div class="field">
@@ -164,6 +168,11 @@
               <input type="checkbox" name="proximity.enabled" style="width:auto;margin:0" />
               <span>Proximity sector <small class="muted" style="font-weight:400">&mdash; close/low planes win, even with no callsign</small></span>
             </label>
+            <small class="muted" style="display:block;margin:0 0 6px;font-weight:400;line-height:1.45">
+              Aim it at your window: set <b>Center</b> to the way it faces and <b>Half-angle&nbsp;90</b> for a half-circle.
+              Catches planes within <b>Max&nbsp;km</b> and below <b>Max&nbsp;alt</b> (height above the airport). Turn on the
+              green &ldquo;Proximity&rdquo; map layer to see it.
+            </small>
             <div class="form-row two">
               <div class="field">
                 <span class="field-label">Center &deg;</span>
@@ -190,6 +199,25 @@
                 <input type="number" step="100" min="0" name="proximity.max_agl_ft" />
               </div>
               <div class="field"></div>
+            </div>
+
+            <div style="height:1px;background:var(--line);margin:10px 0 10px"></div>
+            <span class="field-label" style="display:block;margin-bottom:2px">Flight paths on the map</span>
+            <small class="muted" style="display:block;margin:0 0 6px;font-weight:400;line-height:1.45">
+              Keep a plane&rsquo;s path on the map (faded grey) after it leaves the feed, so you can compare traffic
+              patterns. Toggle the &ldquo;Flight trails&rdquo; map layer to show/hide.
+            </small>
+            <div class="form-row">
+              <div class="field">
+                <span class="field-label">Keep paths after they leave</span>
+                <select name="trail_retain_s">
+                  <option value="0">Off &mdash; remove at once</option>
+                  <option value="300">5 minutes</option>
+                  <option value="900">15 minutes</option>
+                  <option value="1800">30 minutes</option>
+                  <option value="3600">1 hour</option>
+                </select>
+              </div>
             </div>
 
             <div style="height:1px;background:var(--line);margin:10px 0 10px"></div>

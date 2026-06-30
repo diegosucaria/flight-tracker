@@ -131,6 +131,8 @@ let receiverMarker = null, airportMarker = null;
 let didAutoCenter  = false;
 const acMarkers    = new Map();   // hex -> marker
 const acTrails     = new Map();   // hex -> path polyline
+const trailGone    = new Map();   // hex -> perf-time it left the feed (for retained/faded paths)
+let   trailRetainS = 0;           // keep a gone plane's path this long (s); set from config
 let lastFeatured   = null;        // hex of featured (from /ws), to highlight on map
 
 /* divIcon for an aircraft, rotated to track */
@@ -346,7 +348,7 @@ function renderAircraft(data) {
       const style = isFeat ? { color: "#ffd23f", weight: 2, opacity: 0.8 }
                            : { color: "#36c5ff", weight: 1.5, opacity: 0.45 };
       let pl = acTrails.get(ac.hex);
-      if (pl) { pl.setLatLngs(ac.trail); pl.setStyle(style); }
+      if (pl) { pl.setLatLngs(ac.trail); pl.setStyle(style); trailGone.delete(ac.hex); }  // un-ghost if it returned
       else {
         pl = L.polyline(ac.trail, { ...style, interactive: false });
         trailLayer.addLayer(pl); acTrails.set(ac.hex, pl);
@@ -370,8 +372,18 @@ function renderAircraft(data) {
   for (const [hex, m] of acMarkers) {
     if (!seen.has(hex)) { acLayer.removeLayer(m); acMarkers.delete(hex); }
   }
+  // trails: keep a gone plane's path (faded grey) for trail_retain_s so patterns can be compared
+  const retainMs = (trailRetainS || 0) * 1000, nowT = performance.now();
   for (const [hex, pl] of acTrails) {
-    if (!seen.has(hex)) { trailLayer.removeLayer(pl); acTrails.delete(hex); }
+    if (seen.has(hex)) continue;
+    if (retainMs <= 0) { trailLayer.removeLayer(pl); acTrails.delete(hex); continue; }
+    const since = trailGone.get(hex);
+    if (since == null) {                                  // just left → ghost it
+      trailGone.set(hex, nowT);
+      pl.setStyle({ color: "#7c8aa0", weight: 1, opacity: 0.3, dashArray: "2,5" });
+    } else if (nowT - since > retainMs) {                 // retention expired → drop it
+      trailLayer.removeLayer(pl); acTrails.delete(hex); trailGone.delete(hex);
+    }
   }
 
   $("#ac-count").textContent = list.length;
@@ -559,6 +571,8 @@ function fillForm(cfg) {
   set("proximity.min_km", px.min_km);
   set("proximity.max_km", px.max_km);
   set("proximity.max_agl_ft", px.max_agl_ft);
+  set("trail_retain_s", cfg.trail_retain_s);
+  trailRetainS = cfg.trail_retain_s || 0;
   set("brightness", cfg.brightness);
   const bv = $("#bright-val"); if (bv && cfg.brightness != null) bv.textContent = cfg.brightness;
   const chk = (name, val) => { const el = form.elements[name]; if (el) el.checked = !!val; };
@@ -622,6 +636,7 @@ function configBody() {
     select_rule: f["select_rule"].value,
     traffic_mode: (form.querySelector('input[name="traffic_mode"]:checked') || {}).value,
     distance_mode: (form.querySelector('input[name="distance_mode"]:checked') || {}).value,
+    trail_retain_s: numOrNull("trail_retain_s"),
     brightness: numOrNull("brightness"),
     auto_brightness: f["auto_brightness"] ? f["auto_brightness"].checked : null,
     notify_flash: f["notify_flash"] ? f["notify_flash"].checked : null,
@@ -695,6 +710,7 @@ const autoSave = () => { clearTimeout(saveTimer); saveTimer = setTimeout(() => s
 form.addEventListener("submit", (ev) => { ev.preventDefault(); saveConfig(false); });
 form.addEventListener("input", (ev) => {
   if (ev.target.name === "distance_mode") distanceMode = ev.target.value;  // live preview
+  if (ev.target.name === "trail_retain_s") trailRetainS = +ev.target.value || 0;
   if (ev.target.name === "brightness") { const v = $("#bright-val"); if (v) v.textContent = ev.target.value; }
   if (ev.target.name === "panel.scroll_speed_px") { const v = $("#scroll-speed-val"); if (v) v.textContent = ev.target.value; }
   autoSave();

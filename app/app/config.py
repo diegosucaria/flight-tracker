@@ -178,6 +178,9 @@ class Config:
     # Runways whose final approach passes your window (so we can flag "passing by" vs
     # "other side"). Set these to the runway id(s) you can actually see from your location.
     visible_runways: list = field(default_factory=lambda: [])
+    # Keep a flight's map path on screen this long (seconds) AFTER it leaves the feed, faded,
+    # so you can compare traffic patterns. 0 = remove the path the instant the plane is gone.
+    trail_retain_s: int = 0
 
     # --- LED panel (pushed to the display over /ws, applied live) ------------------
     brightness: int = 60                  # 0-100; live-adjustable from the UI
@@ -193,7 +196,7 @@ class Config:
         "lat", "lon", "use_gps", "traffic_mode", "distance_mode", "select_rule",
         "route_api", "home_airport", "airport_lat", "airport_lon", "airport_elev_ft",
         "brightness", "volume", "auto_brightness", "notify_flash", "visible_runways",
-        "hide_no_callsign", "hide_general_aviation",
+        "hide_no_callsign", "hide_general_aviation", "trail_retain_s",
     )
     # Watch sub-fields the API is allowed to set (under the "watch" key).
     _WATCH_MERGEABLE = ("center_deg", "half_angle_deg", "min_km", "max_km")
