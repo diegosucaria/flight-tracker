@@ -19,10 +19,11 @@ from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .airband import airband_status, apply_airband_config, test_beep, write_airband_conf, write_volume
+from . import navdata
 from .airports import home_airport_coords, home_codes, resolve_airport
 from .config import Config
 from .enrich import aircraft_info, route_for_callsign
@@ -461,6 +462,10 @@ async def poll_loop() -> None:
         # so arrivals/departures + to_airport distances are anchored even if the
         # device emits no DB fields. Offline-safe: bundled dict, then optional fetch.
         await _resolve_home_airport(client)
+        # Build the Airways/Navaids/Fixes overlay for this airport in the background — derived at
+        # runtime from the configured airport (like coords + runways); the source is cached to
+        # /config so it downloads once. No build-time variable or committed per-airport data.
+        asyncio.create_task(navdata.ensure_navdata(cfg.airport_lat, cfg.airport_lon, client))
         while True:
             try:
                 await tick(client)
@@ -745,5 +750,13 @@ async def ws_endpoint(ws: WebSocket) -> None:
         clients.discard(ws)
 
 
-# Static web UI (placeholder). Mounted last so /api and /ws take precedence.
+@app.get("/navdata.json")
+async def navdata_json() -> FileResponse:
+    """Serve the runtime-generated aviation overlay (from /config) if present, else the empty
+    placeholder. Defined before the static mount so the generated file wins."""
+    path = navdata.NAVDATA_OUT if os.path.exists(navdata.NAVDATA_OUT) else "static/navdata.json"
+    return FileResponse(path, media_type="application/json")
+
+
+# Static web UI. Mounted last so /api, /ws and /navdata.json take precedence.
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

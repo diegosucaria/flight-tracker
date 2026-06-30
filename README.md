@@ -104,8 +104,8 @@ You need a free [balenaCloud](https://www.balena.io) account (or any way to run
    below). The containers build and start.
 4. **Configure in the browser:** open `http://<device-ip>` and set your watch sector, display
    layout, traffic mode, and (optional) airband frequencies. Everything is live.
-5. **(Optional) aviation overlay:** generate the Airways/Navaids/Fixes map layers for your
-   airport — see below.
+5. **Aviation overlay:** the Airways/Navaids/Fixes layers build themselves on first boot from
+   your configured airport (nothing to do) — details below.
 
 ### Wiring (quick notes)
 
@@ -114,19 +114,18 @@ You need a free [balenaCloud](https://www.balena.io) account (or any way to run
 - Two SDRs draw real current — use the **27 W PSU** (or a powered USB hub) to avoid brownouts.
 - Full wiring, antenna placement, and connector notes are in [docs/HARDWARE.md](docs/HARDWARE.md).
 
-### Aviation map overlay (optional)
+### Aviation map overlay
 
-The "Airways / Navaids / Fixes" map layers come from a small bundled JSON. Generate it for your
-airport from open navdata (no API key):
+The **Airways / Navaids / Fixes** layers are generated **automatically at runtime** from your
+configured airport: on startup the app fetches open navdata once, caches it to `/config`, and
+serves the overlay — no API key, no committed per-airport data, nothing to configure. (To
+pre-generate it offline instead — e.g. a device with no internet — run the same builder locally;
+it writes `app/static/navdata.json`:)
 
 ```bash
 python3 tools/build_navdata.py KSEA          # by ICAO
 python3 tools/build_navdata.py --lat 47.45 --lon -122.31
 ```
-
-This writes `app/static/navdata.json`. Or set the **`HOME_AIRPORT`** GitHub *repository variable*
-and the deploy workflow builds it automatically on each push. Without it, the overlay layers
-simply stay empty.
 
 > Source data is the open X‑Plane navdata (~2012 cycle), so a few recent terminal waypoints may
 > differ from current charts; the enroute airway network is stable.
@@ -138,7 +137,6 @@ every push to `main`. In your repo settings add:
 
 - Secret **`BALENA_TOKEN`** — a balenaCloud API key.
 - Variable **`BALENA_FLEET`** — your fleet slug, e.g. `youruser/flight-tracker`.
-- Variable **`HOME_AIRPORT`** *(optional)* — builds the map overlay during deploy.
 
 ## Local development
 

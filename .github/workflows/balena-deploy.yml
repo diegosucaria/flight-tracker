@@ -4,8 +4,8 @@ name: Deploy to balena
 # GitHub repo settings (Settings → Secrets and variables → Actions):
 #   • Secret   BALENA_TOKEN  = a balenaCloud API key (Preferences → Access tokens)
 #   • Variable BALENA_FLEET  = your fleet slug, e.g. "youruser/flight-tracker"
-#   • Variable HOME_AIRPORT  = your ICAO, e.g. "KSEA" (optional — builds the map overlay)
 # Until BALENA_TOKEN/BALENA_FLEET are set this workflow is a no-op safety net.
+# (The home airport + its map overlay are configured at runtime from the device, not here.)
 
 on:
   push:
@@ -17,11 +17,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # Build the aviation map overlay (Airways/Navaids/Fixes) for the configured airport, so
-      # nothing airport-specific is committed. Skipped if HOME_AIRPORT isn't set.
-      - name: Build navdata overlay
-        if: ${{ vars.HOME_AIRPORT != '' }}
-        run: python3 tools/build_navdata.py "${{ vars.HOME_AIRPORT }}"
       - uses: actions/setup-node@v4
         with:
           node-version: 20

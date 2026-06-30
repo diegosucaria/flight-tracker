@@ -78,6 +78,36 @@ L.control.layers(baseLayers, {
   "Fixes": fixLayer,
 }, { collapsed: true, position: "topright" }).addTo(map);
 
+// Remember the map layer choices across reloads (per browser, localStorage).
+const _LAYERS_KEY = "ft.map.layers.v1";
+const _overlays = {
+  "Watch sector": sectorLayer, "Runways": runwayLayer, "Flight trails": trailLayer,
+  "Airways": airwayLayer, "Navaids": navaidLayer, "Fixes": fixLayer,
+};
+function _saveLayerPrefs() {
+  const on = Object.keys(_overlays).filter((n) => map.hasLayer(_overlays[n]));
+  let base = "Dark";
+  for (const n in baseLayers) if (map.hasLayer(baseLayers[n])) base = n;
+  try { localStorage.setItem(_LAYERS_KEY, JSON.stringify({ overlays: on, base })); } catch (e) {}
+}
+(function _restoreLayerPrefs() {
+  let s = null;
+  try { s = JSON.parse(localStorage.getItem(_LAYERS_KEY) || "null"); } catch (e) { return; }
+  if (!s) return;
+  if (s.base && baseLayers[s.base]) {
+    for (const n in baseLayers) map.removeLayer(baseLayers[n]);
+    baseLayers[s.base].addTo(map);
+  }
+  if (Array.isArray(s.overlays)) {
+    for (const n in _overlays) {
+      const want = s.overlays.includes(n), has = map.hasLayer(_overlays[n]);
+      if (want && !has) _overlays[n].addTo(map);
+      else if (!want && has) map.removeLayer(_overlays[n]);
+    }
+  }
+})();
+map.on("overlayadd overlayremove baselayerchange", _saveLayerPrefs);
+
 /* ---------- aviation overlays: bundled navdata.json for the configured airport (off by default) ---------- */
 const _ndFixIcon = L.divIcon({ className: "", iconSize: [9, 9], iconAnchor: [4, 4], html: '<i class="nd-fix"></i>' });
 fetch("navdata.json").then((r) => (r.ok ? r.json() : null)).then((nd) => {
