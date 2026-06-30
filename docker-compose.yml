@@ -102,6 +102,7 @@ services:
   #    caveat applies until the 27W PSU / powered hub is in.
   airband-speaker:
     build: ./speaker                     # alpine + mpv + alsa-utils baked in (fast, offline-safe restarts)
+    privileged: true                     # write /sys .../authorized to re-enumerate a stuck USB card + see it live
     cpuset: "0,1,2"                      # keep off core 3 (LED refresh)
     group_add:
       - audio
@@ -111,10 +112,7 @@ services:
       - airband
     volumes:
       - airband_config:/airband-config:ro   # read the volume file the app writes (UI volume slider)
-    command:
-      - /bin/sh
-      - -c
-      - "/usr/local/bin/volume-poll.sh & beeped=0; while true; do if aplay -l 2>/dev/null | grep -qi 'USB Audio'; then if [ $$beeped = 0 ]; then echo '[speaker] beep'; timeout 8 speaker-test -D plughw:CARD=Audio -c 2 -t sine -f 880 -l 1 >/dev/null 2>&1; beeped=1; fi; echo '[speaker] mpv start'; mpv --no-video --no-terminal --really-quiet --ao=alsa --audio-device=alsa/plughw:CARD=Audio,DEV=0 --cache=yes --cache-secs=2 --network-timeout=30 --stream-lavf-o-append=reconnect=1 --stream-lavf-o-append=reconnect_streamed=1 --stream-lavf-o-append=reconnect_delay_max=10 --loop=inf http://airband:8000/atc.mp3; echo '[speaker] mpv exited; retry 3s'; sleep 3; else echo '[speaker] USB sound card not enumerated - waiting (re-plug it / power)'; sleep 15; fi; done"
+    command: ["/usr/local/bin/speaker-run.sh"]   # robust loop: re-enumerate the card (boot -71) + free ALSA before each mpv
     restart: unless-stopped
 
   # ── GPS (VK-162 USB on /dev/ttyACM0). gpsd serves the fix on :2947 over the compose

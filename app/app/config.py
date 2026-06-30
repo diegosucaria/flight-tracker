@@ -315,6 +315,10 @@ class Config:
             watch = WatchSector(**_only(WatchSector, data.pop("watch", {})))
             panel = PanelConfig(**_only(PanelConfig, data.pop("panel", {})))
             airband = AirbandConfig(**_only(AirbandConfig, data.pop("airband", {})))
+            # The Icecast mountpoint is a FIXED internal name the speaker + stream URL depend on
+            # — never honour a value persisted from an older release, or a renamed mount silently
+            # de-syncs airband (server) from the speaker (client). Always use the code default.
+            airband.mountpoint = AirbandConfig.mountpoint
             matrix = MatrixConfig(**_only(MatrixConfig, data.pop("matrix", {})))
             # Drop unknown/stale top-level keys too, so a future field rename can't make
             # __init__ raise and silently wipe the entire saved config back to defaults.
