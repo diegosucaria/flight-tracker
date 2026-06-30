@@ -130,9 +130,10 @@ clients: set[WebSocket] = set()
 
 
 def _airport_dict() -> dict:
-    """Current home-airport {code, lat, lon} from config (coords may be None)."""
+    """Current home-airport {code, lat, lon, elev_ft} from config (coords may be None)."""
     lat, lon = home_airport_coords(cfg)
-    return {"code": cfg.home_airport, "lat": lat, "lon": lon}
+    return {"code": cfg.home_airport, "lat": lat, "lon": lon,
+            "elev_ft": getattr(cfg, "airport_elev_ft", 0.0)}
 
 
 def _estimate_duration_min(featured: dict, route: dict | None) -> int | None:
@@ -460,11 +461,12 @@ async def _resolve_home_airport(client: httpx.AsyncClient) -> None:
     Both lookups hit OurAirports (public domain) once and cache to /config, so the geometry
     works for ANY configured airport with nothing hardcoded and no network at runtime after.
     """
-    if not (cfg.airport_lat and cfg.airport_lon):
+    if not (cfg.airport_lat and cfg.airport_lon) or not cfg.airport_elev_ft:
         rec = await resolve_airport(cfg.home_airport, client)
         if rec:
-            cfg.airport_lat = rec["lat"]
-            cfg.airport_lon = rec["lon"]
+            cfg.airport_lat = cfg.airport_lat or rec["lat"]
+            cfg.airport_lon = cfg.airport_lon or rec["lon"]
+            cfg.airport_elev_ft = cfg.airport_elev_ft or rec.get("elev_ft", 0.0)
             with contextlib.suppress(OSError):
                 cfg.save()
     await resolve_runways(cfg.home_airport, client)   # true headings → /config cache

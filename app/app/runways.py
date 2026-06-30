@@ -38,6 +38,10 @@ _RUNWAY_CACHE: dict[str, list[dict]] = {}
 _MATCH_TOL_DEG = 25.0       # how close the track must be to a runway bearing
 _AHEAD_TOL_DEG = 40.0       # how close the airport must be to "straight ahead" (departures)
 _CORRIDOR_KM = 8.0          # final-approach corridor half-width (cross-track from centerline)
+_FINAL_CEILING_AGL_FT = 6000.0   # a plane established on final is within this height of the
+                                 # field; higher up it's still being vectored/descending, so we
+                                 # must NOT claim a runway (a high vectoring track can momentarily
+                                 # cross a runway's extended centerline — that's not a landing).
 
 
 def _ang_diff(a: float, b: float) -> float:
@@ -169,6 +173,13 @@ def infer_landing_runway(ac: dict, airport: dict | None, code: str | None) -> st
     lat, lon = ac.get("lat"), ac.get("lon")
     a_lat, a_lon = airport.get("lat"), airport.get("lon")
     if track is None or None in (lat, lon, a_lat, a_lon):
+        return None
+    # Only an aircraft actually on final (low, near the field altitude) gets a confident runway.
+    # A higher aircraft being vectored isn't committed to a runway yet — claiming one here is
+    # what mislabelled a vectoring arrival's runway and polluted the active-runway rollup.
+    alt = ac.get("alt_baro")
+    elev = airport.get("elev_ft") or 0.0
+    if not isinstance(alt, (int, float)) or (alt - elev) > _FINAL_CEILING_AGL_FT:
         return None
     d_km = haversine_km(a_lat, a_lon, lat, lon)
     to_plane = bearing_deg(a_lat, a_lon, lat, lon)      # bearing FROM the field TO the aircraft

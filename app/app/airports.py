@@ -47,14 +47,19 @@ _OURAIRPORTS_URL = (
 _runtime_cache: dict[str, dict] = {}   # in-memory, loaded lazily from disk
 
 
-def _record(code: str, icao: str, iata, lat, lon, name) -> dict:
+def _record(code: str, icao: str, iata, lat, lon, name, elev=0.0) -> dict:
     """Build the uniform resolver record returned to callers."""
+    try:
+        elev_ft = round(float(elev), 0)
+    except (TypeError, ValueError):
+        elev_ft = 0.0
     return {
         "code": code,
         "icao": icao,
         "iata": iata or None,
         "lat": round(float(lat), 4),
         "lon": round(float(lon), 4),
+        "elev_ft": elev_ft,
         "name": name,
     }
 
@@ -113,7 +118,7 @@ async def _fetch_and_cache(client) -> None:
         iata = (row["iata_code"] or "").strip().upper() or None
         try:
             rec = _record(icao, icao, iata, row["latitude_deg"],
-                          row["longitude_deg"], row["name"])
+                          row["longitude_deg"], row["name"], row.get("elevation_ft"))
         except (TypeError, ValueError):
             continue
         _runtime_cache[icao] = rec
