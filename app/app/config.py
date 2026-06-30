@@ -39,6 +39,24 @@ class WatchSector:
 
 
 @dataclass
+class ProximitySector:
+    """A close 'right in front of me' zone, aimed at your window.
+
+    Aircraft inside it are featured even with NO callsign / even if GA (the clutter
+    filters are bypassed), and take PRIORITY over the broad watch sector — the "it
+    just passed my window" case. The ``max_agl_ft`` gate keeps a high overflight that
+    happens to share the compass direction out of it; ``traffic_mode`` still applies.
+    Defaults to a close full circle (any low+near plane) until you aim it at the window.
+    """
+    enabled: bool = True
+    center_deg: float = 0.0
+    half_angle_deg: float = 180.0   # full circle until you aim it at the window
+    min_km: float = 0.0
+    max_km: float = 8.0             # only genuinely close traffic
+    max_agl_ft: float = 6000.0      # only genuinely low / visible traffic
+
+
+@dataclass
 class PanelConfig:
     """LED panel layout + scroll prefs, pushed live to the display over /ws."""
     layout: str = "hybrid"            # compact | hybrid | big | ticker
@@ -142,6 +160,7 @@ class Config:
     lon: float = field(default_factory=lambda: _env_float("READSB_LON", "RECEIVER_LON"))
     use_gps: bool = True                  # receiver location: GPS (gpsd) when available, else lat/lon
     watch: WatchSector = field(default_factory=WatchSector)
+    proximity: ProximitySector = field(default_factory=ProximitySector)  # close "in front of me" override zone
     select_rule: str = "lowest_closest"   # lowest_closest | closest | strongest
     hide_no_callsign: bool = True         # don't feature aircraft with no flight ID (hex-only)
     hide_general_aviation: bool = False   # don't feature light GA / rotorcraft / gliders (ADS-B category)
@@ -178,6 +197,8 @@ class Config:
     )
     # Watch sub-fields the API is allowed to set (under the "watch" key).
     _WATCH_MERGEABLE = ("center_deg", "half_angle_deg", "min_km", "max_km")
+    # Proximity sub-fields (under the "proximity" key).
+    _PROXIMITY_MERGEABLE = ("enabled", "center_deg", "half_angle_deg", "min_km", "max_km", "max_agl_ft")
     # Panel sub-fields (under the "panel" key).
     _PANEL_MERGEABLE = ("layout", "scroll_speed_px", "scroll_gap_px", "scroll_fields",
                         "cycle_seconds", "idle_behavior", "idle_text", "route_extra")
@@ -231,6 +252,11 @@ class Config:
             for key in self._WATCH_MERGEABLE:
                 if key in watch:
                     setattr(self.watch, key, watch[key])
+        proximity = partial.get("proximity")
+        if isinstance(proximity, dict):
+            for key in self._PROXIMITY_MERGEABLE:
+                if key in proximity:
+                    setattr(self.proximity, key, proximity[key])
         panel = partial.get("panel")
         if isinstance(panel, dict):
             for key in self._PANEL_MERGEABLE:
@@ -313,6 +339,7 @@ class Config:
 
         try:
             watch = WatchSector(**_only(WatchSector, data.pop("watch", {})))
+            proximity = ProximitySector(**_only(ProximitySector, data.pop("proximity", {})))
             panel = PanelConfig(**_only(PanelConfig, data.pop("panel", {})))
             airband = AirbandConfig(**_only(AirbandConfig, data.pop("airband", {})))
             # The Icecast mountpoint is a FIXED internal name the speaker + stream URL depend on
@@ -322,8 +349,8 @@ class Config:
             matrix = MatrixConfig(**_only(MatrixConfig, data.pop("matrix", {})))
             # Drop unknown/stale top-level keys too, so a future field rename can't make
             # __init__ raise and silently wipe the entire saved config back to defaults.
-            return cls(watch=watch, panel=panel, airband=airband, matrix=matrix,
-                       **_only(cls, data))
+            return cls(watch=watch, proximity=proximity, panel=panel, airband=airband,
+                       matrix=matrix, **_only(cls, data))
         except (TypeError, ValueError) as exc:
             print(f"[config] {path} incompatible ({exc}); using defaults")
             return cls()

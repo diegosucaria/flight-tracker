@@ -144,28 +144,57 @@ def _passes_traffic_mode(ac: dict, cfg) -> bool:
     return True   # "all" (or anything unknown) → no filtering
 
 
-def pick_featured(aircraft: list[dict], cfg, last_hex: str | None = None) -> dict | None:
-    """Choose the featured flight: traffic-mode filter → watch sector → select rule.
+def _in_proximity(ac: dict, cfg) -> bool:
+    """Is this aircraft inside the close 'right in front of me' proximity zone?
 
-    ``last_hex`` is the hex of the previously-featured aircraft; if it is still a
-    valid candidate we keep it featured (HYSTERESIS) unless a challenger is clearly
-    better — more than ``_HYSTERESIS_KM`` km closer, or markedly lower — so the
-    display stops flickering between two similar planes.
+    Such aircraft are featured even with no callsign / even if GA (the clutter filters
+    are bypassed) and take priority — the 'it just passed my window' case. Gated on a
+    near distance band, the proximity sector's bearing, AND a low AGL ceiling so a high
+    overflight that merely shares the compass direction doesn't trip it.
+    """
+    p = getattr(cfg, "proximity", None)
+    if p is None or not getattr(p, "enabled", False):
+        return False
+    d = ac.get("distance_km")
+    if d is None or not (p.min_km <= d <= p.max_km):
+        return False
+    if not in_sector(ac.get("bearing_from_me_deg", 0), p.center_deg, p.half_angle_deg):
+        return False
+    elev = getattr(cfg, "airport_elev_ft", 0.0) or 0.0
+    return (alt_ft(ac) - elev) <= p.max_agl_ft
+
+
+def pick_featured(aircraft: list[dict], cfg, last_hex: str | None = None) -> dict | None:
+    """Choose the featured flight: filters → (watch sector OR proximity sector) → rule.
+
+    Two sectors decide candidacy. The broad WATCH sector applies the clutter filters
+    (hide no-callsign / hide GA). The close PROXIMITY sector BYPASSES those filters and
+    takes PRIORITY — a low plane in front of your window is featured even with no flight
+    ID, over a distant arrival. ``traffic_mode`` still applies to both.
+
+    ``last_hex`` is the hex of the previously-featured aircraft; if it is still a valid
+    candidate we keep it featured (HYSTERESIS) unless a challenger is clearly better —
+    more than ``_HYSTERESIS_KM`` km closer, or markedly lower — so the display stops
+    flickering between two similar planes.
     """
     cands: list[dict] = []
     for ac in aircraft:
         if "distance_km" not in ac or not is_airborne(ac):
             continue
-        if getattr(cfg, "hide_no_callsign", False) and not (ac.get("flight") or "").strip():
-            continue                                  # skip hex-only targets (no flight ID)
-        if getattr(cfg, "hide_general_aviation", False) and ac.get("category") in _GA_CATEGORIES:
-            continue                                  # skip light GA / rotorcraft / gliders
-        if not _passes_traffic_mode(ac, cfg):
+        prox = _in_proximity(ac, cfg)
+        # Clutter filters apply only OUTSIDE the proximity zone — a plane right in front
+        # of you is worth featuring even without a flight ID / even if it's light GA.
+        if not prox:
+            if getattr(cfg, "hide_no_callsign", False) and not (ac.get("flight") or "").strip():
+                continue                              # skip hex-only targets (no flight ID)
+            if getattr(cfg, "hide_general_aviation", False) and ac.get("category") in _GA_CATEGORIES:
+                continue                              # skip light GA / rotorcraft / gliders
+        if not _passes_traffic_mode(ac, cfg):         # traffic_mode applies to both sectors
             continue
-        if not (cfg.watch.min_km <= ac["distance_km"] <= cfg.watch.max_km):
-            continue
-        if not in_sector(ac.get("bearing_from_me_deg", 0),
-                         cfg.watch.center_deg, cfg.watch.half_angle_deg):
+        in_watch = (cfg.watch.min_km <= ac["distance_km"] <= cfg.watch.max_km
+                    and in_sector(ac.get("bearing_from_me_deg", 0),
+                                  cfg.watch.center_deg, cfg.watch.half_angle_deg))
+        if not (prox or in_watch):                    # must be in at least one sector
             continue
         cands.append(ac)
 
@@ -177,11 +206,17 @@ def pick_featured(aircraft: list[dict], cfg, last_hex: str | None = None) -> dic
     else:  # default: lowest_closest — lowest altitude, then nearest
         key = lambda a: (alt_ft(a), a["distance_km"])          # noqa: E731
 
-    best = min(cands, key=key)
+    # Priority: if anything is in the proximity zone, feature the best of THOSE — a plane
+    # in front of your window wins over a distant arrival; else use the full pool.
+    prox_cands = [a for a in cands if _in_proximity(a, cfg)]
+    pool = prox_cands or cands
+    best = min(pool, key=key)
 
-    # --- Hysteresis: prefer the incumbent unless the new best is clearly better.
+    # --- Hysteresis: prefer the incumbent unless the new best is clearly better. The
+    # incumbent is honoured only WITHIN the active pool, so a fresh proximity contact
+    # preempts a watch-sector incumbent instead of being held back by hysteresis.
     if last_hex:
-        incumbent = next((a for a in cands if a.get("hex") == last_hex), None)
+        incumbent = next((a for a in pool if a.get("hex") == last_hex), None)
         if incumbent is not None and incumbent is not best:
             closer = incumbent["distance_km"] - best["distance_km"]
             lower = alt_ft(incumbent) - alt_ft(best)

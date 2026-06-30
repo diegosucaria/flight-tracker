@@ -418,6 +418,13 @@ async def tick(client: httpx.AsyncClient) -> None:
             "min_km": cfg.watch.min_km,
             "max_km": cfg.watch.max_km,
         },
+        "proximity": {
+            "enabled": cfg.proximity.enabled,
+            "center_deg": cfg.proximity.center_deg,
+            "half_angle_deg": cfg.proximity.half_angle_deg,
+            "min_km": cfg.proximity.min_km,
+            "max_km": cfg.proximity.max_km,
+        },
         "display": _display_state(force_clock=test_clock),
         "runway": {"active": active_runway_id, "visible": cfg.visible_runways,
                    "list": [{"id": r["id"], "brg": r["brg"]}
@@ -551,6 +558,13 @@ async def aircraft() -> JSONResponse:
             "half_angle_deg": cfg.watch.half_angle_deg,
             "min_km": cfg.watch.min_km,
             "max_km": cfg.watch.max_km,
+        },
+        "proximity": {
+            "enabled": cfg.proximity.enabled,
+            "center_deg": cfg.proximity.center_deg,
+            "half_angle_deg": cfg.proximity.half_angle_deg,
+            "min_km": cfg.proximity.min_km,
+            "max_km": cfg.proximity.max_km,
         },
         "aircraft": all_aircraft,
     })

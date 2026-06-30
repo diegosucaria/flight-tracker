@@ -60,6 +60,7 @@ const baseLayers = {
 baseLayers["Dark"].addTo(map);     // default basemap (dark with labels)
 
 const sectorLayer  = L.layerGroup().addTo(map);
+const proxLayer    = L.layerGroup().addTo(map);   // close "in front of me" proximity zone
 const siteLayer    = L.layerGroup().addTo(map);
 const runwayLayer  = L.layerGroup().addTo(map);   // runway strips + extended-centerline corridors
 const trailLayer   = L.layerGroup().addTo(map);   // flight paths, under the plane markers
@@ -71,6 +72,7 @@ const fixLayer     = L.layerGroup();
 // Layer switcher (top-right): pick a basemap + toggle the data overlays.
 L.control.layers(baseLayers, {
   "Watch sector": sectorLayer,
+  "Proximity": proxLayer,
   "Runways": runwayLayer,
   "Flight trails": trailLayer,
   "Airways": airwayLayer,
@@ -81,8 +83,8 @@ L.control.layers(baseLayers, {
 // Remember the map layer choices across reloads (per browser, localStorage).
 const _LAYERS_KEY = "ft.map.layers.v1";
 const _overlays = {
-  "Watch sector": sectorLayer, "Runways": runwayLayer, "Flight trails": trailLayer,
-  "Airways": airwayLayer, "Navaids": navaidLayer, "Fixes": fixLayer,
+  "Watch sector": sectorLayer, "Proximity": proxLayer, "Runways": runwayLayer,
+  "Flight trails": trailLayer, "Airways": airwayLayer, "Navaids": navaidLayer, "Fixes": fixLayer,
 };
 function _saveLayerPrefs() {
   const on = Object.keys(_overlays).filter((n) => map.hasLayer(_overlays[n]));
@@ -198,16 +200,27 @@ function destPoint(lat, lon, brgDeg, distKm) {
 
 function drawSector(rx, watch) {
   sectorLayer.clearLayers();
-  if (!rx || !watch) return;
-  const { center_deg = 0, half_angle_deg = 180, min_km = 0, max_km = 60 } = watch;
+  _sectorShapes(sectorLayer, rx, watch, "#38bdf8", "#fbbf24");   // watch: blue rings / amber wedge
+}
+
+function drawProximity(rx, prox) {
+  proxLayer.clearLayers();
+  if (!prox || prox.enabled === false) return;                  // disabled → draw nothing
+  _sectorShapes(proxLayer, rx, prox, "#34d399", "#34d399");      // proximity: green
+}
+
+/* draw a sector (whole-circle band or wedge) into `layer` in the given colours */
+function _sectorShapes(layer, rx, g, ringColor, wedgeColor) {
+  if (!rx || !g) return;
+  const { center_deg = 0, half_angle_deg = 180, min_km = 0, max_km = 60 } = g;
   const full = half_angle_deg >= 180;
   if (full) {
     // whole circle band: outer ring (+ inner hole if min_km>0)
-    L.circle([rx.lat, rx.lon], { radius: max_km * 1000, color: "#38bdf8",
-      weight: 1, fillColor: "#38bdf8", fillOpacity: 0.06 }).addTo(sectorLayer);
+    L.circle([rx.lat, rx.lon], { radius: max_km * 1000, color: ringColor,
+      weight: 1, fillColor: ringColor, fillOpacity: 0.06 }).addTo(layer);
     if (min_km > 0)
-      L.circle([rx.lat, rx.lon], { radius: min_km * 1000, color: "#38bdf8",
-        weight: 1, dashArray: "4", fill: false }).addTo(sectorLayer);
+      L.circle([rx.lat, rx.lon], { radius: min_km * 1000, color: ringColor,
+        weight: 1, dashArray: "4", fill: false }).addTo(layer);
     return;
   }
   const step = 4;
@@ -220,11 +233,11 @@ function drawSector(rx, watch) {
     for (let a = a1; a >= a0 - 0.01; a -= step) pts.push(destPoint(rx.lat, rx.lon, a, min_km));
   else
     pts.push([rx.lat, rx.lon]);
-  L.polygon(pts, { color: "#fbbf24", weight: 1.5, fillColor: "#fbbf24",
-    fillOpacity: 0.10, dashArray: "5,5" }).addTo(sectorLayer);
+  L.polygon(pts, { color: wedgeColor, weight: 1.5, fillColor: wedgeColor,
+    fillOpacity: 0.10, dashArray: "5,5" }).addTo(layer);
   // center line
   L.polyline([[rx.lat, rx.lon], destPoint(rx.lat, rx.lon, center_deg, max_km)],
-    { color: "#fbbf24", weight: 1, opacity: 0.5, dashArray: "2,6" }).addTo(sectorLayer);
+    { color: wedgeColor, weight: 1, opacity: 0.5, dashArray: "2,6" }).addTo(layer);
 }
 
 /* place receiver + airport markers */
@@ -311,6 +324,7 @@ function renderAircraft(data) {
   const rx = data.receiver;
   drawSites(rx, data.airport);
   drawSector(rx, data.watch);
+  drawProximity(rx, data.proximity);
   drawRunways(data.airport, data.runway);
 
   // Center once on the receiver, else the configured airport, when its location first arrives.
@@ -539,6 +553,12 @@ function fillForm(cfg) {
   set("watch.half_angle_deg", w.half_angle_deg);
   set("watch.min_km", w.min_km);
   set("watch.max_km", w.max_km);
+  const px = cfg.proximity || {};
+  set("proximity.center_deg", px.center_deg);
+  set("proximity.half_angle_deg", px.half_angle_deg);
+  set("proximity.min_km", px.min_km);
+  set("proximity.max_km", px.max_km);
+  set("proximity.max_agl_ft", px.max_agl_ft);
   set("brightness", cfg.brightness);
   const bv = $("#bright-val"); if (bv && cfg.brightness != null) bv.textContent = cfg.brightness;
   const chk = (name, val) => { const el = form.elements[name]; if (el) el.checked = !!val; };
@@ -546,6 +566,7 @@ function fillForm(cfg) {
   chk("notify_flash", cfg.notify_flash);
   chk("hide_no_callsign", cfg.hide_no_callsign);
   chk("hide_general_aviation", cfg.hide_general_aviation);
+  chk("proximity.enabled", px.enabled);
   const p = cfg.panel || {};
   set("panel.layout", p.layout);
   set("panel.scroll_speed_px", p.scroll_speed_px);
@@ -612,6 +633,14 @@ function configBody() {
       min_km: numOrNull("watch.min_km"),
       max_km: numOrNull("watch.max_km"),
     },
+    proximity: {
+      enabled: f["proximity.enabled"] ? f["proximity.enabled"].checked : null,
+      center_deg: numOrNull("proximity.center_deg"),
+      half_angle_deg: numOrNull("proximity.half_angle_deg"),
+      min_km: numOrNull("proximity.min_km"),
+      max_km: numOrNull("proximity.max_km"),
+      max_agl_ft: numOrNull("proximity.max_agl_ft"),
+    },
     panel: {
       layout: f["panel.layout"] ? f["panel.layout"].value : null,
       scroll_speed_px: numOrNull("panel.scroll_speed_px"),
@@ -628,6 +657,8 @@ function configBody() {
   Object.keys(body).forEach((k) => body[k] == null && delete body[k]);
   Object.keys(body.watch).forEach((k) => body.watch[k] == null && delete body.watch[k]);
   if (!Object.keys(body.watch).length) delete body.watch;
+  Object.keys(body.proximity).forEach((k) => body.proximity[k] == null && delete body.proximity[k]);
+  if (!Object.keys(body.proximity).length) delete body.proximity;
   Object.keys(body.panel).forEach((k) => body.panel[k] == null && delete body.panel[k]);
   if (!Object.keys(body.panel).length) delete body.panel;
   return body;

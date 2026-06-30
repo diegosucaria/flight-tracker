@@ -159,6 +159,39 @@
               </div>
             </div>
 
+            <div style="height:1px;background:var(--line);margin:8px 0 8px"></div>
+            <label class="field-label" style="display:flex;align-items:center;gap:8px;margin-bottom:6px;cursor:pointer">
+              <input type="checkbox" name="proximity.enabled" style="width:auto;margin:0" />
+              <span>Proximity sector <small class="muted" style="font-weight:400">&mdash; close/low planes win, even with no callsign</small></span>
+            </label>
+            <div class="form-row two">
+              <div class="field">
+                <span class="field-label">Center &deg;</span>
+                <input type="number" step="1" min="0" max="360" name="proximity.center_deg" />
+              </div>
+              <div class="field">
+                <span class="field-label">Half-angle &deg;</span>
+                <input type="number" step="1" min="0" max="180" name="proximity.half_angle_deg" />
+              </div>
+            </div>
+            <div class="form-row two">
+              <div class="field">
+                <span class="field-label">Min km</span>
+                <input type="number" step="0.5" min="0" name="proximity.min_km" />
+              </div>
+              <div class="field">
+                <span class="field-label">Max km</span>
+                <input type="number" step="0.5" min="0" name="proximity.max_km" />
+              </div>
+            </div>
+            <div class="form-row two">
+              <div class="field">
+                <span class="field-label">Max alt ft AGL</span>
+                <input type="number" step="100" min="0" name="proximity.max_agl_ft" />
+              </div>
+              <div class="field"></div>
+            </div>
+
             <div style="height:1px;background:var(--line);margin:10px 0 10px"></div>
             <span class="field-label" style="display:block;margin-bottom:6px">Display panel</span>
 
