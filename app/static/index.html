@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>flight-tracker</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div class="brand"><span class="plane">&#9992;</span> flight-tracker</div>
+      <div class="spacer"></div>
+      <div class="stat"><span id="conn-dot" class="conn-dot"></span><span id="conn-text">connecting</span></div>
+      <div class="stat">tracking <b id="ac-count">0</b></div>
+      <div class="stat">range <b id="range-km">&ndash;</b> km</div>
+      <div class="stat">arr rwy <b id="active-rwy" class="rwy-badge">&ndash;</b></div>
+    </header>
+
+    <div id="map"></div>
+
+    <aside class="sidebar">
+      <!-- FEATURED -->
+      <section class="card featured empty" id="featured-card">
+        <h2 data-toggle>Featured flight <span class="chev">&#9662;</span></h2>
+        <div class="body">
+          <div id="featured-body" class="feat-main">
+            <div class="feat-empty-msg">Waiting for a flight in your watch sector&hellip;</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TOWER AUDIO (airband) -->
+      <section class="card" id="airband-card" style="display:none">
+        <h2 data-toggle>Tower audio <span class="chev">&#9662;</span></h2>
+        <div class="body">
+          <div class="airband-row">
+            <button id="twr-listen" class="primary" type="button">&#9654; Listen</button>
+            <span id="twr-state" class="twr-dot"></span>
+            <span id="twr-label">&ndash;</span>
+          </div>
+          <div class="twr-sub" id="twr-sub">scan &middot; &ndash;</div>
+          <div id="freq-editor">
+            <div id="freq-rows"></div>
+            <div class="airband-row freq-controls">
+              <button type="button" id="freq-add" class="ghost">+ Add</button>
+              <label class="gain-lbl">gain
+                <input type="number" id="airband-gain" min="0" max="50" step="1" />
+              </label>
+              <label class="gain-lbl" title="Squelch: dB above noise to open audio. 0 = auto. Raise (try 10–15) to cut noise/static with no voice.">squelch
+                <input type="number" id="airband-squelch" min="0" max="50" step="1" value="9" />
+              </label>
+            </div>
+            <div class="airband-row vol-row">
+              <label class="vol-lbl">volume</label>
+              <input type="range" id="airband-volume" min="0" max="100" step="1" />
+              <span id="vol-val" class="hist-meta"></span>
+            </div>
+            <div class="airband-row">
+              <button type="button" id="airband-save" class="primary">Save &amp; apply <small>(restarts airband)</small></button>
+              <button type="button" id="airband-beep" class="ghost">Test speaker</button>
+            </div>
+            <span id="airband-note" class="save-note"></span>
+          </div>
+          <audio id="twr-audio" preload="none"></audio>
+        </div>
+      </section>
+
+      <!-- CONFIG -->
+      <section class="card" id="config-card">
+        <h2 data-toggle>Configuration <span class="chev">&#9662;</span></h2>
+        <div class="body">
+          <form id="config-form" autocomplete="off">
+            <div class="form-row two">
+              <div class="field">
+                <span class="field-label">Receiver lat</span>
+                <input type="number" step="any" name="lat" />
+              </div>
+              <div class="field">
+                <span class="field-label">Receiver lon</span>
+                <input type="number" step="any" name="lon" />
+              </div>
+            </div>
+
+            <div class="form-row two">
+              <div class="field">
+                <span class="field-label">Home airport</span>
+                <input type="text" name="home_airport" maxlength="6" />
+              </div>
+              <div class="field">
+                <span class="field-label">Select rule</span>
+                <select name="select_rule">
+                  <option value="lowest_closest">lowest + closest</option>
+                  <option value="closest">closest</option>
+                  <option value="strongest">strongest</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-row two">
+              <div class="field">
+                <span class="field-label">Airport lat</span>
+                <input type="number" step="any" name="airport_lat" />
+              </div>
+              <div class="field">
+                <span class="field-label">Airport lon</span>
+                <input type="number" step="any" name="airport_lon" />
+              </div>
+            </div>
+
+            <div class="form-row">
+              <span class="field-label">Traffic mode</span>
+              <div class="seg" data-name="traffic_mode">
+                <label><input type="radio" name="traffic_mode" value="all" /><span>All</span></label>
+                <label><input type="radio" name="traffic_mode" value="arrivals" /><span>Arr</span></label>
+                <label><input type="radio" name="traffic_mode" value="departures" /><span>Dep</span></label>
+                <label><input type="radio" name="traffic_mode" value="arrdep" /><span>A+D</span></label>
+                <label><input type="radio" name="traffic_mode" value="runway" /><span>Runway</span></label>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <span class="field-label">Visible runways <small>pass your window</small></span>
+              <div class="chk-grid" id="visible-runways"></div>
+            </div>
+
+            <div class="form-row">
+              <span class="field-label">Distance mode</span>
+              <div class="seg" data-name="distance_mode">
+                <label><input type="radio" name="distance_mode" value="from_me" /><span>From me</span></label>
+                <label><input type="radio" name="distance_mode" value="to_airport" /><span>To airport</span></label>
+                <label><input type="radio" name="distance_mode" value="both" /><span>Both</span></label>
+              </div>
+            </div>
+
+            <div style="height:1px;background:var(--line);margin:6px 0 10px"></div>
+            <span class="field-label" style="display:block;margin-bottom:6px">Watch sector</span>
+
+            <div class="form-row two">
+              <div class="field">
+                <span class="field-label">Center &deg;</span>
+                <input type="number" step="1" min="0" max="360" name="watch.center_deg" />
+              </div>
+              <div class="field">
+                <span class="field-label">Half-angle &deg;</span>
+                <input type="number" step="1" min="0" max="180" name="watch.half_angle_deg" />
+              </div>
+            </div>
+            <div class="form-row two">
+              <div class="field">
+                <span class="field-label">Min km</span>
+                <input type="number" step="0.5" min="0" name="watch.min_km" />
+              </div>
+              <div class="field">
+                <span class="field-label">Max km</span>
+                <input type="number" step="0.5" min="0" name="watch.max_km" />
+              </div>
+            </div>
+
+            <div style="height:1px;background:var(--line);margin:10px 0 10px"></div>
+            <span class="field-label" style="display:block;margin-bottom:6px">Display panel</span>
+
+            <div class="form-row">
+              <span class="field-label">Brightness <b id="bright-val">60</b></span>
+              <input type="range" min="1" max="100" step="1" name="brightness" id="bright-range" />
+            </div>
+            <div class="form-row two">
+              <div class="field">
+                <span class="field-label">Layout</span>
+                <select name="panel.layout">
+                  <option value="compact">Compact</option>
+                  <option value="hybrid">Hybrid</option>
+                  <option value="big">Big callsign</option>
+                  <option value="ticker">Ticker</option>
+                </select>
+              </div>
+              <div class="field">
+                <span class="field-label">Scroll speed <b id="scroll-speed-val">30</b> px/s</span>
+                <input type="range" min="10" max="80" step="5" name="panel.scroll_speed_px" id="scroll-speed-range" />
+              </div>
+            </div>
+            <div class="form-row">
+              <span class="field-label">Scroll line</span>
+              <div class="chk-grid">
+                <label class="chk"><input type="checkbox" name="panel.scroll_fields" value="operator" /><span>Operator</span></label>
+                <label class="chk"><input type="checkbox" name="panel.scroll_fields" value="route" /><span>Route</span></label>
+                <label class="chk"><input type="checkbox" name="panel.scroll_fields" value="type" /><span>Type</span></label>
+                <label class="chk"><input type="checkbox" name="panel.scroll_fields" value="registration" /><span>Reg</span></label>
+                <label class="chk"><input type="checkbox" name="panel.scroll_fields" value="fl" /><span>FL</span></label>
+                <label class="chk"><input type="checkbox" name="panel.scroll_fields" value="speed" /><span>Speed</span></label>
+                <label class="chk"><input type="checkbox" name="panel.scroll_fields" value="vspeed" /><span>V/S</span></label>
+                <label class="chk"><input type="checkbox" name="panel.scroll_fields" value="dist" /><span>Dist</span></label>
+                <label class="chk"><input type="checkbox" name="panel.scroll_fields" value="eta" /><span>ETA</span></label>
+              </div>
+            </div>
+            <div class="form-row">
+              <span class="field-label">Route extra field</span>
+              <select name="panel.route_extra">
+                <option value="auto">Auto &mdash; altitude for your airport's arr/dep, else type</option>
+                <option value="fl">Flight level (FL045)</option>
+                <option value="alt">Altitude (4500ft)</option>
+                <option value="flalt">FL + feet</option>
+                <option value="flft">FL above 10k, else feet</option>
+                <option value="type">Aircraft type</option>
+                <option value="dist">Distance</option>
+                <option value="speed">Ground speed</option>
+                <option value="none">None</option>
+              </select>
+            </div>
+            <div class="form-row two">
+              <div class="field">
+                <span class="field-label">When idle</span>
+                <select name="panel.idle_behavior">
+                  <option value="message">Message</option>
+                  <option value="clock">Clock</option>
+                  <option value="last">Last flight</option>
+                  <option value="blank">Blank</option>
+                </select>
+              </div>
+              <div class="field">
+                <span class="field-label">Idle text</span>
+                <input type="text" name="panel.idle_text" maxlength="13" />
+              </div>
+            </div>
+            <div class="form-row two">
+              <label class="chk"><input type="checkbox" name="auto_brightness" /><span>Auto-brightness <small>soon</small></span></label>
+              <label class="chk"><input type="checkbox" name="notify_flash" /><span>Flash on arrival <small>soon</small></span></label>
+            </div>
+            <div class="form-row two">
+              <label class="chk"><input type="checkbox" name="hide_no_callsign" /><span>Hide no-callsign flights <small>(hex-only)</small></span></label>
+              <label class="chk"><input type="checkbox" name="hide_general_aviation" /><span>Skip general aviation <small>(light/heli/glider)</small></span></label>
+            </div>
+
+            <button type="button" class="primary" id="test-flight-btn">&#9654; Test flight (fake data)</button>
+            <button type="button" class="primary" id="test-clock-btn">&#9654; Show clock (test)</button>
+            <div class="save-note" id="save-note">Changes save automatically</div>
+          </form>
+        </div>
+      </section>
+
+      <!-- PANEL TUNING (PWM / flicker) -->
+      <section class="card collapsed" id="matrix-card">
+        <h2 data-toggle>Panel tuning <span class="chev">&#9662;</span></h2>
+        <div class="body">
+          <div class="twr-sub">Fight flicker &mdash; applying restarts the panel (~5&thinsp;s). Defaults are the research-recommended set (refresh 200 / gpio 3 / lsb 200 / bits 9); if it still flickers try refresh 0 (uncapped). Real fixes: clean 5V PSU + Bonnet PWM solder mod.</div>
+          <div class="form-row two">
+            <div class="field"><span class="field-label">Refresh Hz <small>0=uncap</small></span><input type="number" id="mx-refresh" min="0" max="1000" step="10" /></div>
+            <div class="field"><span class="field-label">GPIO slowdown</span><input type="number" id="mx-gpio" min="0" max="6" step="1" /></div>
+          </div>
+          <div class="form-row two">
+            <div class="field"><span class="field-label">PWM bits</span><input type="number" id="mx-bits" min="1" max="11" step="1" /></div>
+            <div class="field"><span class="field-label">PWM LSB ns</span><input type="number" id="mx-lsb" min="50" max="400" step="10" /></div>
+          </div>
+          <div class="form-row two">
+            <div class="field"><span class="field-label">Dither bits</span><input type="number" id="mx-dither" min="0" max="2" step="1" /></div>
+            <div class="field"></div>
+          </div>
+          <div class="form-row">
+            <span class="field-label">Hardware mapping <small>use -pwm after the GPIO4&ndash;18 solder mod</small></span>
+            <select id="mx-hw">
+              <option value="adafruit-hat">adafruit-hat (stock, no mod)</option>
+              <option value="adafruit-hat-pwm">adafruit-hat-pwm (soldered jumper)</option>
+            </select>
+          </div>
+          <button type="button" id="mx-apply" class="primary">Apply &amp; restart panel</button>
+          <span id="mx-note" class="save-note"></span>
+        </div>
+      </section>
+
+      <!-- DIAGNOSTICS -->
+      <section class="card collapsed" id="diag-card">
+        <h2 data-toggle>Diagnostics <span class="chev">&#9662;</span></h2>
+        <div class="body">
+          <div class="diag-grid">
+            <div class="diag-cell"><div class="k">Messages</div><div class="v" id="d-messages">&ndash;</div></div>
+            <div class="diag-cell"><div class="k">Aircraft</div><div class="v" id="d-aircraft">&ndash;</div></div>
+            <div class="diag-cell"><div class="k">Max range</div><div class="v" id="d-range">&ndash;</div></div>
+            <div class="diag-cell"><div class="k">GPS fix</div><div class="v" id="d-gps">&ndash;</div></div>
+            <div class="diag-cell wide"><div class="k">Receiver</div><div class="v coords" id="d-receiver">&ndash;</div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- HISTORY -->
+      <section class="card collapsed" id="history-card">
+        <h2 data-toggle>History <span class="chev">&#9662;</span></h2>
+        <div class="body">
+          <div class="hist-controls">
+            <input type="text" id="hist-search" placeholder="search callsign / route / type" />
+          </div>
+          <div class="hist-controls">
+            <select id="hist-range">
+              <option value="today">today</option>
+              <option value="all">all</option>
+            </select>
+            <select id="hist-phase">
+              <option value="">all kinds</option>
+              <option value="arrival">arrivals</option>
+              <option value="departure">departures</option>
+              <option value="overflight">overflights</option>
+            </select>
+            <button type="button" id="hist-refresh" class="ghost" title="refresh">&#8635;</button>
+          </div>
+          <span id="hist-note" class="save-note"></span>
+          <div id="hist-list" class="hist-list"></div>
+          <button type="button" id="hist-more" class="ghost hist-more" hidden>Load more</button>
+          <div id="hist-detail" class="hist-detail" hidden></div>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+# rtl_airband config for the 2nd (airband) RTL-SDR.
+# Copy to rtl_airband.conf and edit. The compose file mounts it read-only.
+#
+# Pin the dongle by the unique serial you set once with:  rtl_eeprom -s airband
+# Output goes to the USB sound card (onboard audio is disabled for the LED matrix).
+# Find your airport's TWR/APP/ATIS frequencies and list them below (Hz).
+#
+# ⚠️ Listening to ATC is legal in many countries for personal use but NOT in Germany
+#    (§89 TKG). Keep this off while in Germany; check the rules where you actually use it.
+
+devices: ({
+  type = "rtlsdr";
+  serial = "airband";
+  gain = 28;
+  centerfreq = 124000000;    # roughly the center of your channels
+  channels: (
+    # TODO: replace with YOUR airport's frequencies
+    { freq = 118100000; modulation = "AM"; outputs: ( { type = "alsa"; device = "default"; } ); },
+    { freq = 121500000; modulation = "AM"; outputs: ( { type = "alsa"; device = "default"; } ); }
+  );
+});

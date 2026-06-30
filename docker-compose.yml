@@ -1,0 +1,132 @@
+# flight-tracker — balena multi-container stack.  WIP: app/display are skeletons.
+# 1090 via Airspy Mini (airspy -> ultrafeeder net-only). Airband (RTL-SDR) added later.
+#
+# Runtime config is set as balena Fleet/Device VARIABLES in the dashboard, NOT here —
+# balena injects them into the containers by name (it does NOT substitute ${VARS} in
+# this file). Set at least these Fleet Variables before/at first deploy:
+#   TZ=<your timezone, e.g. UTC>
+#   HOME_AIRPORT=<your ICAO, e.g. KSEA>
+#   READSB_LAT=<your latitude>     READSB_LON=<your longitude>     READSB_ALT=<e.g. 40m>
+# The app reads READSB_LAT/LON too, so the location is set once.
+version: "2.1"
+
+volumes:
+  ultrafeeder_globe_history:
+  app_config:
+  airband_config:                       # app writes rtl_airband.conf; airband reads it
+  app_data:                             # SQLite flight history (flights.db)
+
+services:
+  # ── Airspy → Beast (1090 decode) ────────────────────────────────────────────
+  airspy:
+    image: ghcr.io/sdr-enthusiasts/airspy_adsb:latest
+    privileged: true                     # USB access to the Airspy
+    cpuset: "0,1,2"                      # keep off core 3 (reserved for the LED refresh thread)
+    environment:
+      - BEASTHOST=ultrafeeder
+      - BEASTPORT=30005
+    restart: unless-stopped
+
+  # ── readsb (net-only) + tar1090 map + aircraft.json ─────────────────────────
+  ultrafeeder:
+    image: ghcr.io/sdr-enthusiasts/docker-adsb-ultrafeeder:latest
+    cpuset: "0,1,2"                      # keep off core 3 (LED refresh)
+    ports:
+      - "8080:80"                        # tar1090 map at http://<device-ip>:8080
+    environment:
+      - READSB_DEVICE_TYPE=none          # net-only; Beast comes from `airspy`
+      - READSB_NET_CONNECTOR=airspy,30005,beast_in
+      # READSB_LAT / READSB_LON / READSB_ALT + TZ come from balena Fleet Variables.
+    volumes:
+      - ultrafeeder_globe_history:/var/globe_history
+    restart: unless-stopped
+
+  # ── The brain + web UI (skeleton) ──────────────────────────────────────────
+  app:
+    build: ./app
+    cpuset: "0,1,2"                      # keep off core 3 (LED refresh)
+    labels:
+      io.balena.features.supervisor-api: '1'   # lets the feed watchdog restart `airspy`
+    ports:
+      - "80:8080"                        # web UI + REST + WebSocket
+    # AIRCRAFT_JSON_URL, ROUTE_API and the READSB_LAT/LON location all have code
+    # defaults; override via balena variables if needed.
+    environment:
+      - AIRBAND_CONFIG_PATH=/airband-config/rtl_airband.conf
+    volumes:
+      - app_config:/config
+      - airband_config:/airband-config       # app writes rtl_airband.conf; airband reads it
+      - app_data:/data                       # SQLite flight history
+    restart: unless-stopped
+
+  # ── LED matrix driver — hzeller rpi-rgb-led-matrix, PIO backend (rp1_pio=1, via /dev/pio0)
+  #    on the Pi 5: the RP1 hardware-times the panel (flicker-immune). Set MATRIX_RP1_PIO=0 for
+  #    the RIO (/dev/mem) fallback. Panel has its own 5V supply + a common ground with the Pi.
+  display:
+    build: ./display
+    privileged: true                     # reach the RP1 PIO (/dev/pio0) + GPIO for the matrix
+    cpuset: "2,3"                        # core 3 = PWM refresh (hzeller-pinned); core 2 = Python render
+    volumes:
+      - app_config:/config:ro            # read PWM/timing tuning the UI wrote (restart applies)
+    restart: unless-stopped
+
+  # ── VHF airband (tower comms): RTL-SDR -> rtl_airband (SCAN) -> bundled Icecast.
+  #    POWER WARNING: a 2nd SDR on the Pi's USB can exceed the Pi 5's 600 mA USB cap on a
+  #    non-27W supply and brown the board out — use a powered USB hub or the 27W PSU.
+  #    No driver clash with the Airspy (librtlsdr vs libairspy). Stream: http://<device-ip>:8000/atc.mp3
+  airband:
+    image: ghcr.io/sdr-enthusiasts/docker-rtlsdrairband:latest
+    privileged: true
+    depends_on:
+      - app                              # let the app seed rtl_airband.conf before we read it
+    cpuset: "0,1,2"                      # keep off core 3 (LED refresh)
+    ports:
+      - "8000:8000"
+    environment:
+      # Custom-config mode: the image reads /run/rtlsdr-airband/rtl_airband.conf (the
+      # shared volume the app writes) and IGNORES the RTLSDRAIRBAND_* vars below — they
+      # remain only as documentation of the seed defaults. To roll back to env-driven
+      # config, drop RTLSDRAIRBAND_CUSTOMCONFIG + the airband_config volume mount.
+      - RTLSDRAIRBAND_CUSTOMCONFIG=true
+      - RTLSDRAIRBAND_FREQS=118.300,119.100,121.750   # example tower/approach/ground (AM) — set yours
+      - RTLSDRAIRBAND_MODE=scan
+      - RTLSDRAIRBAND_GAIN=33
+      - RTLSDRAIRBAND_MOUNTPOINT=atc.mp3
+    volumes:
+      - airband_config:/run/rtlsdr-airband    # app writes rtl_airband.conf here
+    restart: unless-stopped
+
+  # ── Tower audio on LOCAL desk speakers: play the Icecast stream to the USB sound card
+  #    (KT USB Audio = ALSA CARD=Audio). The :8000 network stream stays available too.
+  #    POWER: the USB sound card adds a little draw on top of the 2 SDRs — same brown-out
+  #    caveat applies until the 27W PSU / powered hub is in.
+  airband-speaker:
+    build: ./speaker                     # alpine + mpv + alsa-utils baked in (fast, offline-safe restarts)
+    cpuset: "0,1,2"                      # keep off core 3 (LED refresh)
+    group_add:
+      - audio
+    devices:
+      - "/dev/snd:/dev/snd"
+    depends_on:
+      - airband
+    volumes:
+      - airband_config:/airband-config:ro   # read the volume file the app writes (UI volume slider)
+    command:
+      - /bin/sh
+      - -c
+      - "/usr/local/bin/volume-poll.sh & beeped=0; while true; do if aplay -l 2>/dev/null | grep -qi 'USB Audio'; then if [ $$beeped = 0 ]; then echo '[speaker] beep'; timeout 8 speaker-test -D plughw:CARD=Audio -c 2 -t sine -f 880 -l 1 >/dev/null 2>&1; beeped=1; fi; echo '[speaker] mpv start'; mpv --no-video --no-terminal --really-quiet --ao=alsa --audio-device=alsa/plughw:CARD=Audio,DEV=0 --cache=yes --cache-secs=2 --network-timeout=30 --stream-lavf-o-append=reconnect=1 --stream-lavf-o-append=reconnect_streamed=1 --stream-lavf-o-append=reconnect_delay_max=10 --loop=inf http://airband:8000/atc.mp3; echo '[speaker] mpv exited; retry 3s'; sleep 3; else echo '[speaker] USB sound card not enumerated - waiting (re-plug it / power)'; sleep 15; fi; done"
+    restart: unless-stopped
+
+  # ── GPS (VK-162 USB on /dev/ttyACM0). gpsd serves the fix on :2947 over the compose
+  #    network; the app reads it (app/app/gps.py) and uses it as the receiver position when
+  #    a fix is live, else falls back to READSB_LAT/LON. Safe with no GPS plugged (gpsd just
+  #    has no fix). After plugging the GPS, restart this service so it grabs /dev/ttyACM0.
+  gpsd:
+    build: ./gpsd                        # self-built (the ghcr docker-gpsd image is denied)
+    privileged: true                     # access the USB GPS device
+    cpuset: "0,1,2"                      # keep off core 3 (LED refresh)
+    command:
+      - /bin/sh
+      - -c
+      - "while true; do if [ -e /dev/ttyACM0 ]; then echo '[gpsd] starting on /dev/ttyACM0'; gpsd -N -G -n /dev/ttyACM0; echo '[gpsd] exited; retry 10s'; else echo '[gpsd] waiting for /dev/ttyACM0 (GPS not plugged)'; fi; sleep 10; done"
+    restart: unless-stopped

@@ -1,0 +1,1 @@
+{"meta":{"note":"Empty placeholder. Generate your airport's overlay with `python tools/build_navdata.py <ICAO>`, or set the HOME_AIRPORT repo variable and CI builds it on deploy."},"navaids":[],"fixes":[],"airways":[]}

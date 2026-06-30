@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Node (if a JS web UI is added later)
+node_modules/
+dist/
+
+# Env / secrets
+.env
+*.local
+config.local.json
+
+# Runtime data (config volume, caches)
+/data/
+
+# Downloaded navdata source cache (build_navdata.py) — large, regenerable
+tools/.navdata-cache/
+
+# Local airband config (created from the .example; keep your freqs/serial out of git)
+airband/rtl_airband.conf
+
+# OS
+.DS_Store
+Thumbs.db
