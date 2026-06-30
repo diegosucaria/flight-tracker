@@ -576,8 +576,6 @@ function fillForm(cfg) {
   set("brightness", cfg.brightness);
   const bv = $("#bright-val"); if (bv && cfg.brightness != null) bv.textContent = cfg.brightness;
   const chk = (name, val) => { const el = form.elements[name]; if (el) el.checked = !!val; };
-  chk("auto_brightness", cfg.auto_brightness);
-  chk("notify_flash", cfg.notify_flash);
   chk("hide_no_callsign", cfg.hide_no_callsign);
   chk("hide_general_aviation", cfg.hide_general_aviation);
   chk("proximity.enabled", px.enabled);
@@ -638,8 +636,6 @@ function configBody() {
     distance_mode: (form.querySelector('input[name="distance_mode"]:checked') || {}).value,
     trail_retain_s: numOrNull("trail_retain_s"),
     brightness: numOrNull("brightness"),
-    auto_brightness: f["auto_brightness"] ? f["auto_brightness"].checked : null,
-    notify_flash: f["notify_flash"] ? f["notify_flash"].checked : null,
     hide_no_callsign: f["hide_no_callsign"] ? f["hide_no_callsign"].checked : null,
     hide_general_aviation: f["hide_general_aviation"] ? f["hide_general_aviation"].checked : null,
     watch: {
