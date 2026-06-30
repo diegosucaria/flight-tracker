@@ -104,6 +104,10 @@ test_clock: bool = False           # UI clock-test override: force the idle flip
 # Rolling window of recently-inferred landing runways -> the airport's active runway.
 _recent_runways: deque = deque(maxlen=40)
 active_runway_id: str | None = None
+# Per-aircraft LOCKED departure runway (hex -> id). A plane departs ONE runway then turns onto
+# its route; without locking, the post-takeoff turn re-matches a different runway's heading. We
+# lock the first confident match (the straight initial climb) and prune when the aircraft leaves.
+_departure_runways: dict = {}
 # Most recent landing at the home field (callsign, runway, monotonic) — for the LANDED flash.
 _recent_landing: tuple | None = None
 LANDED_MSG_TTL = 25.0    # seconds the LANDED message lingers after touchdown
@@ -338,16 +342,26 @@ async def tick(client: httpx.AsyncClient) -> None:
                 ac["window_visible"] = active_runway_id in (cfg.visible_runways or [])
     active_runway_id = active_runway(list(_recent_runways))
 
-    # Departure-runway inference: a plane classified as departing, climbing out aligned
-    # with a runway (field behind). Reuse window_visible so the panel/UI can flag a
-    # departure climbing past your window too.
+    # Departure-runway inference: a plane classified as departing, climbing out aligned with a
+    # runway (field behind). The runway is LOCKED per aircraft on the first confident match (the
+    # straight initial climb) — once it turns onto its route the track no longer reflects the
+    # departure runway, so we must not relabel it. Reuse window_visible for the panel/UI flag.
     for ac in annotated:
         if ac.get("landing_runway") or not ac.get("is_departure"):
             continue
-        rwy = infer_departure_runway(ac, airport, cfg.home_airport)
+        hx = ac.get("hex")
+        rwy = _departure_runways.get(hx)
+        if not rwy:
+            rwy = infer_departure_runway(ac, airport, cfg.home_airport)
+            if rwy and hx:
+                _departure_runways[hx] = rwy        # lock it for the rest of this departure
         if rwy:
             ac["departure_runway"] = rwy
             ac["window_visible"] = rwy in (cfg.visible_runways or [])
+    # Drop aircraft that have left coverage so the lock cache can't grow unbounded.
+    _live_hexes = {a.get("hex") for a in annotated}
+    for _hx in [h for h in _departure_runways if h not in _live_hexes]:
+        del _departure_runways[_hx]
 
     featured = pick_featured(annotated, cfg, last_hex=last_featured_hex)
     if featured is not None:

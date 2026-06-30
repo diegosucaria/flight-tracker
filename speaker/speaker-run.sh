@@ -28,7 +28,7 @@ while true; do
   if card_up; then
     if [ "$beeped" = 0 ]; then
       echo "[speaker] beep"
-      timeout 8 speaker-test -D plughw:CARD=Audio -c 2 -t sine -f 880 -l 1 >/dev/null 2>&1
+      timeout 0.5 speaker-test -D plughw:CARD=Audio -c 1 -t sine -f 880 >/dev/null 2>&1   # ~0.5s
       beeped=1
     fi
     pkill mpv 2>/dev/null; sleep 1      # ensure the exclusive ALSA device is free before launch
