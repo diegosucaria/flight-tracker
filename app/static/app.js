@@ -771,8 +771,18 @@ function airbandBody() {
 function airbandNote(m, c) {
   const e = $("#airband-note"); if (e) { e.textContent = m; e.className = "save-note " + (c || ""); }
 }
+let _airbandTimer = null, _airbandSaving = false;
+// rtl_airband can't hot-reload (it re-tunes only on restart), so applying changes restarts the
+// airband container. Auto-apply on a short debounce after a committed change — no Save button,
+// and rapid edits batch into a single restart.
+function _scheduleAirbandApply() {
+  clearTimeout(_airbandTimer);
+  airbandNote("Will apply shortly…");
+  _airbandTimer = setTimeout(saveAirband, 900);
+}
 async function saveAirband() {
-  const btn = $("#airband-save"); if (btn) btn.disabled = true;
+  if (_airbandSaving) { _scheduleAirbandApply(); return; }   // serialize: retry after the current apply
+  _airbandSaving = true;
   airbandNote("Applying… (airband restarts, audio drops briefly)");
   try {
     const r = await fetch("api/airband/config", {
@@ -784,7 +794,7 @@ async function saveAirband() {
     if (res.airband) fillAirband({ airband: res.airband });
     airbandNote(res.restarted ? "Applied — airband restarting…" : "Saved (not on balena)", "ok");
   } catch (e) { airbandNote("Apply failed (" + e.message + ")", "err"); }
-  finally { if (btn) btn.disabled = false; }
+  finally { _airbandSaving = false; }
 }
 async function testBeep() {
   const btn = $("#airband-beep"); if (btn) btn.disabled = true;
@@ -798,10 +808,15 @@ async function testBeep() {
   finally { setTimeout(() => { if (btn) btn.disabled = false; }, 3000); }
 }
 if ($("#freq-add")) $("#freq-add").addEventListener("click", () => renderFreqRow());
-if (freqRows) freqRows.addEventListener("click", (ev) => {
-  if (ev.target.classList.contains("f-del")) ev.target.closest(".freq-row").remove();
+if (freqRows) {
+  freqRows.addEventListener("click", (ev) => {
+    if (ev.target.classList.contains("f-del")) { ev.target.closest(".freq-row").remove(); _scheduleAirbandApply(); }
+  });
+  freqRows.addEventListener("change", _scheduleAirbandApply);   // a freq mhz/label was committed
+}
+["#airband-gain", "#airband-squelch"].forEach((sel) => {
+  const el = $(sel); if (el) el.addEventListener("change", _scheduleAirbandApply);
 });
-if ($("#airband-save")) $("#airband-save").addEventListener("click", saveAirband);
 
 /* ---------- USB sound-card volume (live; the speaker polls the value, no restart) ---------- */
 const volSlider = $("#airband-volume");
