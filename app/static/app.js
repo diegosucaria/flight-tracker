@@ -71,6 +71,7 @@ const fixLayer     = L.layerGroup();
 const metarLayer   = L.layerGroup();   // airport METAR + per-runway wind — off by default
 const flightsLayer = L.layerGroup();   // recent arrivals/departures (OpenSky) — off by default
 const coverageLayer= L.layerGroup();   // ADS-B reception envelope from history — off by default
+const airspaceLayer= L.layerGroup();   // OpenAIP airspaces (CTR/TMA/restricted) — off by default
 
 // Layer switcher (top-right): pick a basemap + toggle the data overlays.
 L.control.layers(baseLayers, {
@@ -81,6 +82,7 @@ L.control.layers(baseLayers, {
   "Weather (METAR)": metarLayer,
   "Flights (recent)": flightsLayer,
   "ADS-B coverage": coverageLayer,
+  "Airspace": airspaceLayer,
   "Airways": airwayLayer,
   "Navaids": navaidLayer,
   "Fixes": fixLayer,
@@ -91,7 +93,8 @@ const _LAYERS_KEY = "ft.map.layers.v1";
 const _overlays = {
   "Watch sector": sectorLayer, "Proximity": proxLayer, "Runways": runwayLayer,
   "Flight trails": trailLayer, "Weather (METAR)": metarLayer, "Flights (recent)": flightsLayer,
-  "ADS-B coverage": coverageLayer, "Airways": airwayLayer, "Navaids": navaidLayer, "Fixes": fixLayer,
+  "ADS-B coverage": coverageLayer, "Airspace": airspaceLayer, "Airways": airwayLayer,
+  "Navaids": navaidLayer, "Fixes": fixLayer,
 };
 function _saveLayerPrefs() {
   const on = Object.keys(_overlays).filter((n) => map.hasLayer(_overlays[n]));
@@ -446,12 +449,33 @@ async function refreshCoverage() {
 map.on("overlayadd", (e) => { if (e.layer === coverageLayer) refreshCoverage(); });
 map.on("overlayremove", (e) => { if (e.layer === coverageLayer) { coverageLayer.clearLayers(); _covCtrl(null); } });
 
+/* ---------- airspace layer: OpenAIP CTR / TMA / restricted around the airport ---------- */
+async function refreshAirspace() {
+  if (!map.hasLayer(airspaceLayer)) return;
+  try {
+    const r = await fetch("api/airspace", { cache: "no-store" });
+    const d = r.ok ? await r.json() : null;
+    airspaceLayer.clearLayers();
+    ((d && d.airspaces) || []).forEach((a) => {
+      const col = a.restrictive ? "#f87171" : "#38bdf8";
+      const alt = (a.lower || a.upper) ? `${esc(a.lower || "?")} – ${esc(a.upper || "?")}` : "";
+      L.polygon(a.ring, { color: col, weight: 1, fillColor: col, fillOpacity: 0.05 })
+        .bindPopup(`<div class="popup"><b>${esc(a.name || "Airspace")}</b>`
+          + (a.class ? `<br>Class ${esc(a.class)}` : "") + (alt ? `<br>${alt}` : "") + `</div>`)
+        .addTo(airspaceLayer);
+    });
+  } catch (e) { /* keep last-drawn */ }
+}
+map.on("overlayadd", (e) => { if (e.layer === airspaceLayer) refreshAirspace(); });
+map.on("overlayremove", (e) => { if (e.layer === airspaceLayer) airspaceLayer.clearLayers(); });
+
 // Layers restored from saved prefs on page load are added programmatically, which does
 // NOT fire the layer control's overlayadd — so kick off an initial fetch for any corner-box
 // layer that came back ON. (Each early-returns if its layer is off.)
 refreshMetar();
 refreshFlights();
 refreshCoverage();
+refreshAirspace();
 
 /* ---------- /api/aircraft polling ---------- */
 async function pollAircraft() {

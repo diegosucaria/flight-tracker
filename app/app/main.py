@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .airband import airband_status, apply_airband_config, test_beep, write_airband_conf, write_volume
-from . import navdata, metar, flights
+from . import navdata, metar, flights, openaip
 from .airports import home_airport_coords, home_codes, resolve_airport
 from .config import Config
 from .enrich import aircraft_info, route_for_callsign
@@ -649,6 +649,14 @@ async def api_flights() -> JSONResponse:
     """Recent (observed, ~3h) arrivals/departures at the home airport — OpenSky, not a schedule."""
     async with httpx.AsyncClient() as client:
         data = await flights.get_flights(cfg.home_airport, client)
+    return JSONResponse(data or {})
+
+
+@app.get("/api/airspace")
+async def api_airspace() -> JSONResponse:
+    """Airspaces around the home airport (OpenAIP; needs OPENAIP_API_KEY). Empty without a key."""
+    async with httpx.AsyncClient() as client:
+        data = await openaip.get_airspaces(cfg.home_airport, cfg.airport_lat, cfg.airport_lon, client)
     return JSONResponse(data or {})
 
 

@@ -155,6 +155,20 @@ Usage is light: **one airport call per refresh** returns *every* arrival and dep
 (never one-per-aircraft), it's **cached ~30 min**, and it only fetches **while the layer is
 open** — so it stays well inside the free tier for normal use.
 
+### Airspace layer (optional)
+
+The map's **Airspace** layer draws the controlled/restricted airspace around your airport
+(CTR, TMA, danger/restricted areas) from **[OpenAIP](https://www.openaip.net)**. It needs a
+free key:
+
+1. Create a free account at [OpenAIP](https://www.openaip.net) (→ accounts.openaip.net).
+2. Generate an **API key** in your account settings.
+3. Set it as the **`OPENAIP_API_KEY`** variable (Device/Fleet → Variables).
+
+Then toggle **Airspace** in the map's layers menu — controlled airspace is blue, restricted/
+danger/prohibited is red; click any zone for its class + altitude limits. (Airspaces barely
+change, so it's cached for hours — negligible API use.)
+
 ### Auto‑deploy with GitHub Actions (optional)
 
 [`.github/workflows/balena-deploy.yml`](.github/workflows/balena-deploy.yml) pushes a release on
@@ -179,6 +193,7 @@ none of these beyond the getting-started ones and configure everything in the UI
 | `AIRPORT_LAT`, `AIRPORT_LON`, `AIRPORT_ELEV_FT` | Airport lat / lon | Pin the airport location/elevation instead of resolving it from the ICAO. |
 | `ROUTE_API` | — | Route-enrichment source (`adsbdb`, the default). |
 | `FLIGHTS_API_KEY` | — | RapidAPI key for [AeroDataBox](https://rapidapi.com/aedbx-aedbx/api/aerodatabox) → the map's **Flights** layer shows **scheduled** arrivals/departures. Without it, that layer falls back to OpenSky's recent *observed* traffic (free, no key). |
+| `OPENAIP_API_KEY` | — | [OpenAIP](https://www.openaip.net) API key → enables the **Airspace** map layer (CTR/TMA/restricted around your airport). Free. |
 | `READSB_ALT` | — | Receiver altitude (used by the decoder). |
 | `TZ` | — | Timezone, e.g. `America/Los_Angeles`. |
 
