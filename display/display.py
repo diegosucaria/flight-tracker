@@ -208,12 +208,22 @@ def _route_extra_text(featured, mode):
     return typ
 
 
+def _badge_runway(featured):
+    """Runway to show on the badge: the landing runway (arrival, always), or the departure
+    runway ONLY while still in its takeoff/climbout phase — it clears past 10k with depart_phase."""
+    if featured.get("landing_runway"):
+        return featured.get("landing_runway")
+    if featured.get("departure_runway") and featured.get("depart_phase"):
+        return featured.get("departure_runway")
+    return None
+
+
 def _runway_badge_color(featured):
+    if not _badge_runway(featured):
+        return None
     if featured.get("window_visible"):
         return (0, 200, 0)            # PASSING BY your window
-    if featured.get("landing_runway") or featured.get("departure_runway"):
-        return (255, 170, 0)          # using a runway on the OTHER SIDE
-    return None
+    return (255, 170, 0)              # using a runway on the OTHER SIDE
 
 
 def _field_text(featured, f):
@@ -314,7 +324,7 @@ def render_hybrid(d, featured, disp) -> None:
     d.text((1, 0), cs[:9], font=med, fill=_callsign_color(featured))
     col = _runway_badge_color(featured)
     if col:
-        rwy = str(featured.get("landing_runway") or featured.get("departure_runway") or "")[:2]
+        rwy = str(_badge_runway(featured) or "")[:2]
         bw = 14
         bx = WIDTH - bw
         d.rectangle((bx, 0, WIDTH - 1, 9), fill=col)

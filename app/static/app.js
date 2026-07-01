@@ -681,6 +681,9 @@ function renderFeatured(featured) {
     </div>
     ${tags.length ? `<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">${tags.join("")}</div>` : ""}
     <div class="feat-route">${routeHtml}</div>
+    ${(featured.origin_name || featured.destination_name)
+      ? `<div class="feat-route-names">${esc(featured.origin_name || "?")} <span class="arrow">&rarr;</span> ${esc(featured.destination_name || "?")}</div>`
+      : ""}
     ${idLine ? `<div class="feat-airline" style="margin:-6px 0 8px">${idLine}${featured.type_desc ? " · " + esc(featured.type_desc) : ""}</div>` : ""}
     <div class="feat-grid">
       ${kv("Altitude", `${ft(featured.alt_baro)} <span class="trend ${t.cls}">${t.glyph}</span>`)}

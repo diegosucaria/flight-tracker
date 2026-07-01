@@ -162,6 +162,8 @@ html, body {
 .feat-route .arrow { color: var(--accent); font-weight: 400; }
 .feat-route .ap { color: var(--fg); }
 .feat-route .ap.unknown { color: var(--fg-mute); font-size: 16px; font-weight: 500; }
+.feat-route-names { font-size: 13px; color: var(--fg-mute); margin: -8px 0 10px; display: flex; gap: 8px; align-items: center; }
+.feat-route-names .arrow { color: var(--accent); opacity: .7; }
 
 .feat-grid {
   display: grid;

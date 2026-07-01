@@ -278,6 +278,11 @@ async def _enrich_featured(featured: dict, client: httpx.AsyncClient, airport: d
                 featured["destination"] = route.get("destination")
                 # Fix adsbdb's direction with the plane's own geometry before classifying.
                 _correct_route_direction(featured, airport)
+                # Airport display names, keyed by code so they follow any direction swap.
+                _names = {route.get("origin"): route.get("origin_name"),
+                          route.get("destination"): route.get("destination_name")}
+                featured["origin_name"] = _names.get(featured.get("origin"))
+                featured["destination_name"] = _names.get(featured.get("destination"))
             else:
                 # Stale reused-callsign route — endpoints don't match where the plane is.
                 # Drop it (the panel/UI fall back to type+reg) rather than show a wrong pair.

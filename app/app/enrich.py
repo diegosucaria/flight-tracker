@@ -58,6 +58,9 @@ async def route_for_callsign(callsign: str, client: httpx.AsyncClient) -> dict |
             out = {
                 "origin": _airport_code(origin),
                 "destination": _airport_code(dest),
+                # human name for the UI (city first, else the airport name)
+                "origin_name": origin.get("municipality") or origin.get("name"),
+                "destination_name": dest.get("municipality") or dest.get("name"),
                 "airline": (fr.get("airline") or {}).get("name"),
                 # coords (may be None) → used for the duration estimate
                 "origin_lat": origin.get("latitude"),
