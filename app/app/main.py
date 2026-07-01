@@ -310,16 +310,22 @@ async def _enrich_featured(featured: dict, client: httpx.AsyncClient, airport: d
 def _departure_phase(ac: dict, elev: float) -> str | None:
     """Drives the TAKING OFF -> TOOK OFF -> gone lifecycle for a departing featured flight.
 
-    'takeoff'  = just lifted off (< 1500 ft AGL);
-    'climbout' = climbing away (still <= 10000 ft MSL);
+    'takeoff'  = still over/near the field AND low — the roll + initial climb;
+    'climbout' = has left the field (>3.5 km) or climbed past ~1200 ft AGL — "TOOK OFF";
     None       = not departing, or past 10000 ft MSL (message + runway badge disappear).
+
+    The transition is DISTANCE-first so a slow climber (or a stuck/low altitude read) still
+    flips to "took off" once it has clearly departed the field, instead of reading "taking
+    off" all the way out.
     """
     if not ac.get("is_departure"):
         return None
     alt = ac.get("alt_baro")
     if not isinstance(alt, (int, float)) or alt > 10000.0:
         return None
-    return "takeoff" if (alt - (elev or 0.0)) < 1500.0 else "climbout"
+    dist = ac.get("distance_to_airport_km")
+    over_field = isinstance(dist, (int, float)) and dist <= 3.5
+    return "takeoff" if (over_field and (alt - (elev or 0.0)) < 1200.0) else "climbout"
 
 
 async def tick(client: httpx.AsyncClient) -> None:
