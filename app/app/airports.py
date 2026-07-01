@@ -167,8 +167,14 @@ def home_codes(cfg) -> set[str]:
     """
     code = (getattr(cfg, "home_airport", "") or "").strip().upper()
     codes = {code} if code else set()
-    # Map ICAO<->IATA from the bundled seed OR the resolved-airport cache (populated at startup
-    # by resolve_airport), so any home airport — not just seeded ones — matches IATA routes.
+    # The IATA resolved + persisted at startup (cfg.home_iata) — the reliable path. The disk cache
+    # is only written when an UNKNOWN code is FETCHED, which is SKIPPED when coords are already
+    # cached; without this a level departure/arrival (no climb/descent to fall back on) never
+    # matches its IATA route and is missed.
+    iata = (getattr(cfg, "home_iata", "") or "").strip().upper()
+    if iata:
+        codes.add(iata)
+    # Fallbacks: the bundled seed OR the resolved-airport disk cache.
     hit = _lookup_bundled(code) or _load_disk_cache().get(code)
     if hit:
         if hit.get("icao"):

@@ -515,12 +515,17 @@ async def _resolve_home_airport(client: httpx.AsyncClient) -> None:
     Both lookups hit OurAirports (public domain) once and cache to /config, so the geometry
     works for ANY configured airport with nothing hardcoded and no network at runtime after.
     """
-    if not (cfg.airport_lat and cfg.airport_lon) or not cfg.airport_elev_ft:
+    need_coords = not (cfg.airport_lat and cfg.airport_lon) or not cfg.airport_elev_ft
+    # Also resolve when the IATA is missing — a device with cached coords (from before this field
+    # existed) would otherwise never learn its IATA, and IATA route matching (adsbdb) would fail,
+    # so a LEVEL arrival/departure (no climb/descent to fall back on) is never detected.
+    if need_coords or not cfg.home_iata:
         rec = await resolve_airport(cfg.home_airport, client)
         if rec:
             cfg.airport_lat = cfg.airport_lat or rec["lat"]
             cfg.airport_lon = cfg.airport_lon or rec["lon"]
             cfg.airport_elev_ft = cfg.airport_elev_ft or rec.get("elev_ft", 0.0)
+            cfg.home_iata = cfg.home_iata or (rec.get("iata") or "")
             with contextlib.suppress(OSError):
                 cfg.save()
     await resolve_runways(cfg.home_airport, client)   # true headings → /config cache

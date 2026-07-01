@@ -172,6 +172,9 @@ class Config:
     # or pick it in the UI. Coords + runways are resolved from OurAirports at startup and
     # cached, so nothing here is airport-specific. Leave coords 0.0 to resolve from the code.
     home_airport: str = field(default_factory=lambda: os.environ.get("HOME_AIRPORT", ""))
+    # IATA of home_airport, resolved + persisted at startup. adsbdb routes are IATA, so this is
+    # what arrival/departure matching compares against. Auto-resolved; not a user/env field.
+    home_iata: str = ""
     airport_lat: float = field(default_factory=lambda: _env_float("AIRPORT_LAT", default=0.0))
     airport_lon: float = field(default_factory=lambda: _env_float("AIRPORT_LON", default=0.0))
     airport_elev_ft: float = field(default_factory=lambda: _env_float("AIRPORT_ELEV_FT", default=0.0))
@@ -289,9 +292,14 @@ class Config:
         if not isinstance(partial, dict):
             return self
         locked = self.env_locked()               # env-overridden fields are read-only
+        prev_airport = (self.home_airport or "").strip().upper()
         for key in self._MERGEABLE:
             if key in partial and key not in locked:
                 setattr(self, key, partial[key])
+        # If the home airport changed, its resolved IATA (+ coords) are stale — clear so the
+        # next startup re-resolves them from OurAirports.
+        if (self.home_airport or "").strip().upper() != prev_airport:
+            self.home_iata = ""
         watch = partial.get("watch")
         if isinstance(watch, dict):
             for key in self._WATCH_MERGEABLE:
