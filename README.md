@@ -169,10 +169,11 @@ none of these beyond the getting-started ones and configure everything in the UI
 | `BALENA_TOKEN` *(secret)* | balenaCloud API key. |
 | `BALENA_FLEET` | Fleet slug, e.g. `youruser/flight-tracker`. |
 
-**Advanced / internal** (sensible defaults; rarely changed): `POLL_SECONDS`, `AIRCRAFT_JSON_URL`
-(point the app at a tar1090 feed for local dev), `GPSD_HOST` / `GPSD_PORT`, `CONFIG_PATH`,
-`NAVDATA_PATH`, `HISTORY_DB_PATH` / `HISTORY_POSITION_DAYS`, plus the airband/watchdog service
-knobs. See [`.env.example`](.env.example) for the annotated full set.
+**Advanced / internal** (sensible defaults; rarely changed): `SHOW_PANEL_TUNING` (set to reveal
+the LED **Panel tuning** card — the PWM/flicker knobs, hidden by default), `POLL_SECONDS`,
+`AIRCRAFT_JSON_URL` (point the app at a tar1090 feed for local dev), `GPSD_HOST` / `GPSD_PORT`,
+`CONFIG_PATH`, `NAVDATA_PATH`, `HISTORY_DB_PATH` / `HISTORY_POSITION_DAYS`, plus the airband/watchdog
+service knobs. See [`.env.example`](.env.example) for the annotated full set.
 
 ## Local development
 

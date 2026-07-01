@@ -113,10 +113,11 @@ _departure_runways: dict = {}
 _recent_landing: tuple | None = None
 LANDED_MSG_TTL = 25.0    # seconds the LANDED message lingers after touchdown
 # In-memory flight-path trails for the live map: hex -> recent (lat, lon) points.
-TRAIL_MAX = 240          # points kept per aircraft (~4 min at 1 Hz)
-TRAIL_TTL = 90.0         # drop a trail when its hex hasn't been seen for this long (s)
-TRAIL_EMIT = 48          # max trail points emitted for a nearby (in-band) aircraft over /ws
-TRAIL_EMIT_FAR = 12      # shorter trail for far aircraft (trims the /ws payload on the Pi)
+TRAIL_MAX = 480          # points kept per aircraft (~8 min at 1 Hz) — keep a longer path to follow
+TRAIL_TTL = 300.0        # keep a trail through coverage gaps up to this long (s), so a brief
+                         #   ADS-B dropout doesn't wipe it and restart from the new position
+TRAIL_EMIT = 60          # max trail points emitted for a nearby (in-band) aircraft over /ws
+TRAIL_EMIT_FAR = 32      # far aircraft: shorter, but not so short the path visibly jumps near->far
 trails: dict = {}        # hex -> deque[(lat, lon)]
 _trail_seen: dict = {}   # hex -> monotonic last-seen
 # Full /ws payload (featured + count + aircraft + map context) — pushed each tick so the
@@ -576,6 +577,7 @@ def _config_payload() -> dict:
     data = cfg.to_dict()
     data["runways"] = [r["id"] for r in runways_for(cfg.home_airport)]
     data["_env_locked"] = sorted(cfg.env_locked())   # fields forced by env vars → read-only in the UI
+    data["_show_panel_tuning"] = bool(os.environ.get("SHOW_PANEL_TUNING"))  # advanced PWM knobs, hidden by default
     return data
 
 

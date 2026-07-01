@@ -270,38 +270,49 @@ function _wDir(m) {
   if (m.wind_dir == null) return "calm";
   return String(m.wind_dir).padStart(3, "0") + "°";
 }
-function windIcon(m) {
-  const spd = m.wind_speed_kt, hasDir = m.wind_dir != null && !m.variable;
-  const fav = (m.runways || []).find((r) => r.favored);
+function windArrowIcon(m) {   // small arrow floated ABOVE the airport pin (no overlap with its label)
+  const hasDir = m.wind_dir != null && !m.variable;
   const arrow = hasDir
     ? `<span class="wind-arr" style="transform:rotate(${m.wind_dir + 180}deg)">↑</span>`  // points downwind
     : `<span class="wind-arr">·</span>`;
-  const lbl = `${_wDir(m)}${spd != null ? " " + spd + "kt" : ""}${m.gust_kt ? "G" + m.gust_kt : ""}`
-    + (fav ? " · RWY " + esc(fav.id) : "");
-  return L.divIcon({ className: "wind-icon", iconSize: [110, 46], iconAnchor: [55, 23],
-    html: `<span class="wind-arr-wrap">${arrow}</span><span class="wind-txt">${lbl}</span>` });
+  return L.divIcon({ className: "wind-icon", iconSize: [22, 22], iconAnchor: [11, 40], html: arrow });
 }
-function metarPopup(m) {
+function metarBoxHtml(m) {
   const rows = (m.runways || []).map((r) => {
-    const comp = r.tailwind ? `<b class="tw">${Math.abs(r.headwind)} kt tailwind</b>`
+    const comp = r.tailwind ? `<b class="tw">${Math.abs(r.headwind)} kt tail</b>`
                             : `${r.headwind} kt head`;
     const cross = r.crosswind ? ` · ${r.crosswind} kt cross (${r.cross_from})` : "";
     return `<tr><td>${esc(r.id)}${r.favored ? " ★" : ""}</td><td>${comp}${cross}</td></tr>`;
   }).join("");
-  return `<div class="popup metar-popup"><b>${esc(m.icao || "METAR")}</b>`
+  return `<div class="metar-hd">${esc(m.icao || "METAR")}</div>`
     + `<div class="metar-raw">${esc(m.raw || "")}</div>`
-    + `<div class="metar-wind">Wind: ${_wDir(m)}`
-    + `${m.wind_speed_kt != null ? " at " + m.wind_speed_kt + " kt" : ""}${m.gust_kt ? " gust " + m.gust_kt : ""}</div>`
+    + `<div class="metar-wind">Wind ${_wDir(m)}`
+    + `${m.wind_speed_kt != null ? " · " + m.wind_speed_kt + " kt" : ""}${m.gust_kt ? " G" + m.gust_kt : ""}</div>`
     + (rows ? `<table class="metar-rwy">${rows}</table>` : "")
-    + (rows ? `<div class="muted" style="margin-top:4px">★ wind-favoured runway</div>` : "")
-    + `</div>`;
+    + (rows ? `<div class="metar-fav">★ wind-favoured runway</div>` : "");
+}
+// the METAR box is a fixed corner panel (bottom-left), not a popup over the airport
+const metarControl = L.control({ position: "bottomleft" });
+metarControl.onAdd = function () {
+  this._d = L.DomUtil.create("div", "metar-box");
+  L.DomEvent.disableClickPropagation(this._d);
+  return this._d;
+};
+let _metarCtrlOn = false;
+function _metarCtrl(html) {
+  if (html != null) {
+    if (!_metarCtrlOn) { metarControl.addTo(map); _metarCtrlOn = true; }
+    metarControl._d.innerHTML = html;
+  } else if (_metarCtrlOn) { map.removeControl(metarControl); _metarCtrlOn = false; }
 }
 function drawMetar() {
   metarLayer.clearLayers();
   const m = _metarData, ap = _airportLL;
-  if (!m || !ap || ap.lat == null || (m.wind_dir == null && !m.raw)) return;
-  L.marker([ap.lat, ap.lon], { icon: windIcon(m), zIndexOffset: 700 })
-    .bindPopup(metarPopup(m)).addTo(metarLayer);
+  if (!map.hasLayer(metarLayer) || !m || (m.wind_dir == null && !m.raw)) { _metarCtrl(null); return; }
+  _metarCtrl(metarBoxHtml(m));                                    // full box in the corner
+  if (ap && ap.lat != null)                                      // + a small arrow above the airport
+    L.marker([ap.lat, ap.lon], { icon: windArrowIcon(m), zIndexOffset: 650, interactive: false })
+      .addTo(metarLayer);
 }
 async function refreshMetar() {
   if (!map.hasLayer(metarLayer)) return;
@@ -313,7 +324,7 @@ async function refreshMetar() {
   drawMetar();
 }
 map.on("overlayadd", (e) => { if (e.layer === metarLayer) refreshMetar(); });
-map.on("overlayremove", (e) => { if (e.layer === metarLayer) metarLayer.clearLayers(); });
+map.on("overlayremove", (e) => { if (e.layer === metarLayer) { metarLayer.clearLayers(); _metarCtrl(null); } });
 setInterval(refreshMetar, 5 * 60 * 1000);   // METARs update ~hourly; refresh every 5 min while shown
 
 /* ---------- /api/aircraft polling ---------- */
@@ -670,6 +681,9 @@ function fillForm(cfg) {
     el.title = on ? "Forced by an environment variable — change that instead" : "";
     const fld = el.closest(".field"); if (fld) fld.classList.toggle("env-locked", on);
   });
+  // Panel-tuning (PWM) card is hidden unless the SHOW_PANEL_TUNING env var is set.
+  const mxCard = $("#matrix-card");
+  if (mxCard) mxCard.style.display = cfg._show_panel_tuning ? "" : "none";
 }
 
 async function loadConfig() {
@@ -866,13 +880,14 @@ function fillAirband(cfg) {
     const v = $("#airband-volume"); if (v) v.value = cfg.volume;
     const vv = $("#vol-val"); if (vv) vv.textContent = cfg.volume + "%";
   }
-  const sub = $("#twr-sub");
-  if (sub) {
-    const on = (a.freqs || []).filter((r) => r.enabled !== false);
-    sub.textContent = on.length
-      ? "scan · " + on.map((r) => `${r.label || ""} ${(+r.mhz).toFixed(2)}`.trim()).join(" · ")
-      : "no frequencies enabled";
-  }
+  airbandSummary(a);
+}
+function airbandSummary(a) {
+  const sub = $("#twr-sub"); if (!sub) return;
+  const on = (a.freqs || []).filter((r) => r.enabled !== false);
+  sub.textContent = on.length
+    ? "scan · " + on.map((r) => `${r.label || ""} ${(+r.mhz).toFixed(2)}`.trim()).join(" · ")
+    : "no frequencies enabled";
 }
 function airbandBody() {
   const freqs = [...document.querySelectorAll("#freq-rows .freq-row")].map((row) => ({
@@ -908,20 +923,25 @@ async function saveAirband() {
     });
     if (!r.ok) throw new Error(r.status);
     const res = await r.json();
-    if (res.airband) fillAirband({ airband: res.airband });
+    // Update ONLY the summary line — never rebuild the freq rows here, or it steals focus
+    // mid-type (the auto-apply fires while you're still editing).
+    if (res.airband) airbandSummary(res.airband);
     airbandNote(res.restarted ? "Applied — airband restarting…" : "Saved (not on balena)", "ok");
   } catch (e) { airbandNote("Apply failed (" + e.message + ")", "err"); }
   finally { _airbandSaving = false; }
 }
+function beepNote(m, c) {   // Test speaker lives in Diagnostics now, so its feedback goes there
+  const e = $("#beep-note"); if (e) { e.textContent = m; e.className = "save-note " + (c || ""); }
+}
 async function testBeep() {
   const btn = $("#airband-beep"); if (btn) btn.disabled = true;
-  airbandNote("Testing speaker… (listen for a beep in a few seconds)");
+  beepNote("Testing speaker… (listen for a beep in a few seconds)");
   try {
     const r = await fetch("api/airband/test-beep", { method: "POST" });
     if (!r.ok) throw new Error(r.status);
     const res = await r.json();
-    airbandNote(res.restarted ? "Speaker restarting — beep incoming" : "Not on balena (no speaker)", "ok");
-  } catch (e) { airbandNote("Test failed (" + e.message + ")", "err"); }
+    beepNote(res.restarted ? "Speaker restarting — beep incoming" : "Not on balena (no speaker)", "ok");
+  } catch (e) { beepNote("Test failed (" + e.message + ")", "err"); }
   finally { setTimeout(() => { if (btn) btn.disabled = false; }, 3000); }
 }
 if ($("#freq-add")) $("#freq-add").addEventListener("click", () => renderFreqRow());

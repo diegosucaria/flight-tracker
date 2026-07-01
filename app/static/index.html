@@ -60,7 +60,6 @@
             </div>
             <div class="airband-row">
               <span class="save-note muted">Changes apply automatically <small>(airband restarts briefly)</small></span>
-              <button type="button" id="airband-beep" class="ghost">Test speaker</button>
             </div>
             <span id="airband-note" class="save-note"></span>
           </div>
@@ -301,8 +300,8 @@
         </div>
       </section>
 
-      <!-- PANEL TUNING (PWM / flicker) -->
-      <section class="card collapsed" id="matrix-card">
+      <!-- PANEL TUNING (PWM / flicker) — hidden unless SHOW_PANEL_TUNING env var is set -->
+      <section class="card collapsed" id="matrix-card" style="display:none">
         <h2 data-toggle>Panel tuning <span class="chev">&#9662;</span></h2>
         <div class="body">
           <div class="twr-sub">Fight flicker &mdash; applying restarts the panel (~5&thinsp;s). Defaults are the research-recommended set (refresh 200 / gpio 3 / lsb 200 / bits 9); if it still flickers try refresh 0 (uncapped). Real fixes: clean 5V PSU + Bonnet PWM solder mod.</div>
@@ -340,6 +339,10 @@
             <div class="diag-cell"><div class="k">Max range</div><div class="v" id="d-range">&ndash;</div></div>
             <div class="diag-cell"><div class="k">GPS fix</div><div class="v" id="d-gps">&ndash;</div></div>
             <div class="diag-cell wide"><div class="k">Receiver</div><div class="v coords" id="d-receiver">&ndash;</div></div>
+          </div>
+          <div class="airband-row" style="margin-top:12px">
+            <button type="button" id="airband-beep" class="ghost">Test speaker</button>
+            <span id="beep-note" class="save-note"></span>
           </div>
         </div>
       </section>
