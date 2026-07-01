@@ -352,12 +352,14 @@ def render_hybrid(d, featured, disp) -> None:
     if featured.get("landed"):
         d.text((17, 22), "LANDED", font=small, fill=(0, 230, 90))
         return
-    key = (featured.get("hex"), "hybrid", bool(featured.get("is_departure")))
-    if key != _scroll_key:
-        _scroll_str = _scroll_string(featured, disp.get("scroll_fields"))
-        _scroll_w = int(d.textlength(_scroll_str, font=small)) if _scroll_str else 0
-        _scroll_x = 0.0
-        _scroll_key = key
+    key = (featured.get("hex"), "hybrid")            # reset the scroll POSITION only on a new flight
+    s = _scroll_string(featured, disp.get("scroll_fields"))
+    if s != _scroll_str or key != _scroll_key:       # refresh TEXT whenever it changes (phase, dist, eta…)
+        _scroll_str = s
+        _scroll_w = int(d.textlength(s, font=small)) if s else 0
+        if key != _scroll_key:                       # new flight → restart the marquee from the right
+            _scroll_x = 0.0
+            _scroll_key = key
     if _scroll_str and _scroll_w:
         gap = int(disp.get("scroll_gap_px", 12))
         total = _scroll_w + gap
