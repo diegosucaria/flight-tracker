@@ -27,7 +27,7 @@ from . import navdata, metar, flights
 from .airports import home_airport_coords, home_codes, resolve_airport
 from .config import Config
 from .enrich import aircraft_info, route_for_callsign
-from .geo import haversine_km
+from .geo import bearing_deg, haversine_km
 from .runways import (
     active_runway, infer_departure_runway, infer_landing_runway, resolve_runways, runways_for,
 )
@@ -603,6 +603,39 @@ async def api_metar() -> JSONResponse:
     async with httpx.AsyncClient() as client:
         data = await metar.get_metar(cfg.home_airport, runways_for(cfg.home_airport), client)
     return JSONResponse(data or {})
+
+
+def _compute_coverage(since: int, rx_lat: float, rx_lon: float) -> dict:
+    """Max reception range per 5° bearing bin (72 bins) over the recorded positions."""
+    BINS = 72
+    rng = [0.0] * BINS
+    count = 0
+    maxkm = 0.0
+    for r in history.positions_since(since):
+        la, lo = r.get("lat"), r.get("lon")
+        if not isinstance(la, (int, float)) or not isinstance(lo, (int, float)):
+            continue
+        d = haversine_km(rx_lat, rx_lon, la, lo)
+        i = int(bearing_deg(rx_lat, rx_lon, la, lo) // 5) % BINS
+        if d > rng[i]:
+            rng[i] = round(d, 1)
+        if d > maxkm:
+            maxkm = d
+        count += 1
+    return {"rx": {"lat": rx_lat, "lon": rx_lon}, "range_km": rng,
+            "max_km": round(maxkm, 1), "count": count}
+
+
+@app.get("/api/coverage")
+async def api_coverage(hours: float = 24.0) -> JSONResponse:
+    """ADS-B reception envelope (max range per bearing) from stored history — for comparing
+    antenna positions. Scans the position table off the event loop."""
+    hours = max(0.1, min(720.0, hours))
+    since = int(time.time() - hours * 3600)
+    rx_lat, rx_lon = receiver_pos()
+    data = await asyncio.to_thread(_compute_coverage, since, rx_lat, rx_lon)
+    data["hours"] = hours
+    return JSONResponse(data)
 
 
 @app.get("/api/flights")

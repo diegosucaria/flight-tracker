@@ -197,6 +197,12 @@ class History:
             """SELECT ts,lat,lon,alt_baro,gs,track,baro_rate FROM position
                WHERE flight_id=? ORDER BY ts""", (flight_id,))
 
+    def positions_since(self, since_ts: int, limit: int = 400000) -> list[dict]:
+        """All recorded (lat, lon, alt) fixes since ``since_ts`` — feeds the coverage heatmap."""
+        return self._query(
+            "SELECT lat,lon,alt_baro FROM position WHERE ts>=? AND lat IS NOT NULL LIMIT ?",
+            (int(since_ts), int(limit)))
+
     def _query(self, sql: str, params: tuple) -> list[dict]:
         if self._conn is None:
             return []

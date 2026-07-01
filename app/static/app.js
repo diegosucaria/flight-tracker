@@ -70,6 +70,7 @@ const navaidLayer  = L.layerGroup();
 const fixLayer     = L.layerGroup();
 const metarLayer   = L.layerGroup();   // airport METAR + per-runway wind — off by default
 const flightsLayer = L.layerGroup();   // recent arrivals/departures (OpenSky) — off by default
+const coverageLayer= L.layerGroup();   // ADS-B reception envelope from history — off by default
 
 // Layer switcher (top-right): pick a basemap + toggle the data overlays.
 L.control.layers(baseLayers, {
@@ -79,6 +80,7 @@ L.control.layers(baseLayers, {
   "Flight trails": trailLayer,
   "Weather (METAR)": metarLayer,
   "Flights (recent)": flightsLayer,
+  "ADS-B coverage": coverageLayer,
   "Airways": airwayLayer,
   "Navaids": navaidLayer,
   "Fixes": fixLayer,
@@ -89,7 +91,7 @@ const _LAYERS_KEY = "ft.map.layers.v1";
 const _overlays = {
   "Watch sector": sectorLayer, "Proximity": proxLayer, "Runways": runwayLayer,
   "Flight trails": trailLayer, "Weather (METAR)": metarLayer, "Flights (recent)": flightsLayer,
-  "Airways": airwayLayer, "Navaids": navaidLayer, "Fixes": fixLayer,
+  "ADS-B coverage": coverageLayer, "Airways": airwayLayer, "Navaids": navaidLayer, "Fixes": fixLayer,
 };
 function _saveLayerPrefs() {
   const on = Object.keys(_overlays).filter((n) => map.hasLayer(_overlays[n]));
@@ -373,11 +375,59 @@ map.on("overlayadd", (e) => { if (e.layer === flightsLayer) refreshFlights(); })
 map.on("overlayremove", (e) => { if (e.layer === flightsLayer) _flightsCtrl(null); });
 setInterval(refreshFlights, 10 * 60 * 1000);   // OpenSky /flights is rate-limited + slow-moving
 
+/* ---------- ADS-B coverage layer: reception envelope from stored history ---------- */
+let _coverageData = null, _covCtrlOn = false, _covHours = 24;
+const coverageControl = L.control({ position: "bottomleft" });
+coverageControl.onAdd = function () {
+  this._d = L.DomUtil.create("div", "metar-box cov-box");
+  L.DomEvent.disableClickPropagation(this._d);
+  return this._d;
+};
+function _covCtrl(html) {
+  if (html != null) {
+    if (!_covCtrlOn) { coverageControl.addTo(map); _covCtrlOn = true; }
+    coverageControl._d.innerHTML = html;
+    const sel = document.getElementById("cov-hours");
+    if (sel) sel.onchange = () => { _covHours = +sel.value || 24; refreshCoverage(); };
+  } else if (_covCtrlOn) { map.removeControl(coverageControl); _covCtrlOn = false; }
+}
+function coverageBoxHtml(c) {
+  const opts = [[1, "1 h"], [6, "6 h"], [24, "24 h"], [168, "7 d"], [720, "30 d"]];
+  return `<div class="metar-hd">ADS-B coverage</div>`
+    + `<label class="cov-tf">timeframe <select id="cov-hours">`
+    + opts.map(([v, l]) => `<option value="${v}"${v === _covHours ? " selected" : ""}>${l}</option>`).join("")
+    + `</select></label>`
+    + `<div class="cov-stat">max range <b>${c.max_km != null ? c.max_km + " km" : "—"}</b></div>`
+    + `<div class="cov-stat">positions <b>${(c.count || 0).toLocaleString()}</b></div>`
+    + `<div class="metar-fav">envelope = farthest plane seen per direction</div>`;
+}
+function drawCoverage() {
+  coverageLayer.clearLayers();
+  const c = _coverageData;
+  if (!map.hasLayer(coverageLayer) || !c || !c.rx || !Array.isArray(c.range_km)) { _covCtrl(null); return; }
+  const rx = c.rx;
+  const pts = c.range_km.map((km, i) => km > 0 ? destPoint(rx.lat, rx.lon, i * 5, km) : [rx.lat, rx.lon]);
+  L.polygon(pts, { color: "#22d3ee", weight: 1.5, fillColor: "#22d3ee",
+    fillOpacity: 0.12, interactive: false }).addTo(coverageLayer);
+  _covCtrl(coverageBoxHtml(c));
+}
+async function refreshCoverage() {
+  if (!map.hasLayer(coverageLayer)) return;
+  try {
+    const r = await fetch("api/coverage?hours=" + _covHours, { cache: "no-store" });
+    _coverageData = r.ok ? await r.json() : null;
+  } catch (e) { /* keep last-known */ }
+  drawCoverage();
+}
+map.on("overlayadd", (e) => { if (e.layer === coverageLayer) refreshCoverage(); });
+map.on("overlayremove", (e) => { if (e.layer === coverageLayer) { coverageLayer.clearLayers(); _covCtrl(null); } });
+
 // Layers restored from saved prefs on page load are added programmatically, which does
 // NOT fire the layer control's overlayadd — so kick off an initial fetch for any corner-box
-// layer that came back ON. (Both early-return if their layer is off.)
+// layer that came back ON. (Each early-returns if its layer is off.)
 refreshMetar();
 refreshFlights();
+refreshCoverage();
 
 /* ---------- /api/aircraft polling ---------- */
 async function pollAircraft() {

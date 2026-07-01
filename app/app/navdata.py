@@ -8,13 +8,51 @@ offline/CLI use.) Best-effort: any failure just leaves the overlay empty.
 """
 from __future__ import annotations
 
+import csv
+import io
 import json
 import os
 
 _REPO = "https://raw.githubusercontent.com/ptsmonteiro/x-plane-navdata/master"
 _FILES = ("earth_fix.dat", "earth_nav.dat", "earth_awy.dat")
+# Navaids come from OurAirports (public domain, CURRENT) instead of the 2012 X-Plane cycle;
+# fixes + airways stay on X-Plane (no free current source for the enroute network).
+_OA_NAVAIDS = "https://raw.githubusercontent.com/davidmegginson/ourairports-data/main/navaids.csv"
+_CACHE_V = 2                                                  # bump to force a rebuild of old overlays
 _NAV_KIND = {2: "NDB", 3: "VOR", 13: "DME"}
 _PRIO = {"VOR": 3, "NDB": 2, "DME": 1}
+
+
+def _navaids_from_csv(csv_text: str, lat: float, lon: float, radius: float) -> list[dict]:
+    """Current navaids in the bbox from OurAirports navaids.csv (VOR/NDB/DME, deduped)."""
+    lat_min, lat_max, lon_min, lon_max = lat - radius, lat + radius, lon - radius, lon + radius
+
+    def kind(t: str):
+        t = (t or "").upper()
+        if t.startswith("VOR") or t == "VORTAC":
+            return "VOR"
+        if t.startswith("NDB"):
+            return "NDB"
+        if t in ("DME", "TACAN"):
+            return "DME"
+        return None
+
+    best: dict = {}
+    for row in csv.DictReader(io.StringIO(csv_text)):
+        try:
+            la, lo = float(row["latitude_deg"]), float(row["longitude_deg"])
+        except (ValueError, KeyError, TypeError):
+            continue
+        if not (lat_min <= la <= lat_max and lon_min <= lo <= lon_max):
+            continue
+        k = kind(row.get("type"))
+        ident = (row.get("ident") or "").strip()
+        if not k or not ident:
+            continue
+        if ident not in best or _PRIO[k] > _PRIO[best[ident]["kind"]]:
+            best[ident] = {"id": ident, "kind": k, "lat": round(la, 5), "lon": round(lo, 5),
+                           "name": (row.get("name") or "").title()}
+    return sorted(best.values(), key=lambda n: n["id"])
 RADIUS = 2.7                                                  # half-box (deg) around the airport
 NAVDATA_OUT = os.environ.get("NAVDATA_PATH", "/config/navdata.json")
 _SRC_DIR = os.environ.get("NAVDATA_SRC_DIR", "/config/.navdata-src")
@@ -84,7 +122,7 @@ def _build(fix_txt: str, nav_txt: str, awy_txt: str, lat: float, lon: float, rad
     fixes = [f for f in fixes if (round(f["lat"], 2), round(f["lon"], 2)) in awy_pts]
 
     return {
-        "meta": {"cycle": "2012.08", "source": "X-Plane navdata (GPL v3)",
+        "meta": {"v": _CACHE_V, "cycle": "2012.08", "source": "X-Plane fixes/airways + OurAirports navaids",
                  "bbox": [round(lat_min, 4), round(lat_max, 4), round(lon_min, 4), round(lon_max, 4)]},
         "navaids": navaids, "fixes": fixes, "airways": airways,
     }
@@ -94,8 +132,10 @@ def _cached_for(out: str, lat: float, lon: float) -> bool:
     """True if `out` was already generated for ~this airport (bbox centred on lat/lon)."""
     try:
         with open(out) as f:
-            bb = json.load(f).get("meta", {}).get("bbox")
-        return bool(bb) and abs((bb[0] + bb[1]) / 2 - lat) < 0.05 and abs((bb[2] + bb[3]) / 2 - lon) < 0.05
+            meta = json.load(f).get("meta", {})
+        bb = meta.get("bbox")
+        return (meta.get("v") == _CACHE_V and bool(bb)     # old-version caches rebuild once
+                and abs((bb[0] + bb[1]) / 2 - lat) < 0.05 and abs((bb[2] + bb[3]) / 2 - lon) < 0.05)
     except (OSError, ValueError, TypeError):
         return False
 
@@ -121,6 +161,18 @@ async def ensure_navdata(lat, lon, client, out: str = NAVDATA_OUT, src_dir: str 
             with open(p, encoding="utf-8", errors="replace") as fh:
                 txt[f] = fh.read()
         data = _build(txt["earth_fix.dat"], txt["earth_nav.dat"], txt["earth_awy.dat"], lat, lon, radius)
+        # swap in CURRENT navaids from OurAirports (best-effort; keep the X-Plane ones on failure)
+        try:
+            p = os.path.join(src_dir, "navaids.csv")
+            if not (os.path.exists(p) and os.path.getsize(p) > 1000):
+                r = await client.get(_OA_NAVAIDS, timeout=120)
+                r.raise_for_status()
+                with open(p, "w", encoding="utf-8") as fh:
+                    fh.write(r.text)
+            with open(p, encoding="utf-8", errors="replace") as fh:
+                data["navaids"] = _navaids_from_csv(fh.read(), lat, lon, radius)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[navdata] OurAirports navaids skipped (keeping X-Plane): {exc}")
         os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
         tmp = out + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
