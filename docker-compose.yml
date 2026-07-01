@@ -102,17 +102,19 @@ services:
   #    caveat applies until the 27W PSU / powered hub is in.
   airband-speaker:
     build: ./speaker                     # alpine + mpv + alsa-utils baked in (fast, offline-safe restarts)
-    privileged: true                     # write /sys .../drivers/usb/{unbind,bind} to re-enumerate a stuck USB card
+    privileged: true                     # /sys .../drivers/usb/{unbind,bind} to re-enumerate a stuck USB
+                                         # card, + mknod its /dev/snd nodes if it enumerates after start
     cpuset: "0,1,2"                      # keep off core 3 (LED refresh)
     group_add:
       - audio
+    devices:
+      - "/dev/snd:/dev/snd"              # NOTE: static snapshot at container-create (balena forbids bind
+                                         # mounts); speaker-run.sh mknod's the USB card's nodes if it
+                                         # comes up later (see the script header)
     depends_on:
       - airband
     volumes:
       - airband_config:/airband-config:ro   # read the volume file the app writes (UI volume slider)
-      - /dev/snd:/dev/snd                    # BIND mount = LIVE view of ALSA: a card that enumerates
-                                             # AFTER start is visible immediately (a `devices:` snapshot
-                                             # taken at container-create time never sees the hotplug)
     command: ["/usr/local/bin/speaker-run.sh"]   # robust loop: re-enumerate the card (boot -71) + free ALSA before each mpv
     restart: unless-stopped
 
