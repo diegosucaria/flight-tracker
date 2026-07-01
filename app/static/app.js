@@ -776,12 +776,13 @@ if (twrAudio) twrAudio.addEventListener("error", () => {
 
 /* ---------- airband freq editor + speaker test ---------- */
 const freqRows = $("#freq-rows");
-function renderFreqRow(mhz = "", label = "") {
+function renderFreqRow(mhz = "", label = "", enabled = true) {
   if (!freqRows) return;
   const row = document.createElement("div");
-  row.className = "freq-row";
+  row.className = "freq-row" + (enabled ? "" : " disabled");
   row.innerHTML =
-    `<input type="number" class="f-mhz" min="108" max="137" step="0.001" value="${esc(mhz)}" placeholder="118.300" />`
+    `<input type="checkbox" class="f-en" title="scan this frequency"${enabled ? " checked" : ""} />`
+    + `<input type="number" class="f-mhz" min="108" max="137" step="0.001" value="${esc(mhz)}" placeholder="118.300" />`
     + `<input type="text" class="f-label" maxlength="8" value="${esc(label)}" placeholder="TWR" />`
     + `<button type="button" class="f-del ghost" title="remove">×</button>`;
   freqRows.appendChild(row);
@@ -790,7 +791,7 @@ function fillAirband(cfg) {
   if (!freqRows) return;
   const a = (cfg && cfg.airband) || {};
   freqRows.innerHTML = "";
-  (a.freqs || []).forEach((r) => renderFreqRow(r.mhz, r.label || ""));
+  (a.freqs || []).forEach((r) => renderFreqRow(r.mhz, r.label || "", r.enabled !== false));
   const g = $("#airband-gain"); if (g && a.gain != null) g.value = a.gain;
   const sq = $("#airband-squelch"); if (sq) sq.value = (a.squelch_snr != null ? a.squelch_snr : 9);
   if (cfg && cfg.volume != null) {
@@ -798,13 +799,18 @@ function fillAirband(cfg) {
     const vv = $("#vol-val"); if (vv) vv.textContent = cfg.volume + "%";
   }
   const sub = $("#twr-sub");
-  if (sub) sub.textContent = "scan · " + (a.freqs || [])
-    .map((r) => `${r.label || ""} ${(+r.mhz).toFixed(2)}`.trim()).join(" · ");
+  if (sub) {
+    const on = (a.freqs || []).filter((r) => r.enabled !== false);
+    sub.textContent = on.length
+      ? "scan · " + on.map((r) => `${r.label || ""} ${(+r.mhz).toFixed(2)}`.trim()).join(" · ")
+      : "no frequencies enabled";
+  }
 }
 function airbandBody() {
   const freqs = [...document.querySelectorAll("#freq-rows .freq-row")].map((row) => ({
     mhz: parseFloat(row.querySelector(".f-mhz").value),
     label: row.querySelector(".f-label").value.trim(),
+    enabled: row.querySelector(".f-en").checked,
   })).filter((r) => !isNaN(r.mhz));
   const body = { freqs, gain: parseFloat($("#airband-gain").value) };
   const sq = parseFloat(($("#airband-squelch") || {}).value);
@@ -855,7 +861,11 @@ if (freqRows) {
   freqRows.addEventListener("click", (ev) => {
     if (ev.target.classList.contains("f-del")) { ev.target.closest(".freq-row").remove(); _scheduleAirbandApply(); }
   });
-  freqRows.addEventListener("change", _scheduleAirbandApply);   // a freq mhz/label was committed
+  freqRows.addEventListener("change", (ev) => {                 // a freq mhz/label/enable changed
+    if (ev.target.classList.contains("f-en"))
+      ev.target.closest(".freq-row").classList.toggle("disabled", !ev.target.checked);
+    _scheduleAirbandApply();
+  });
 }
 ["#airband-gain", "#airband-squelch"].forEach((sel) => {
   const el = $(sel); if (el) el.addEventListener("change", _scheduleAirbandApply);

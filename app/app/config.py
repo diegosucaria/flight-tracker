@@ -126,10 +126,12 @@ devices: (
 class AirbandConfig:
     """VHF airband scan freqs + RF gain; rendered to rtl_airband.conf on a shared volume."""
     # Example VHF airband freqs — replace with your airport's tower/approach/ground in the UI.
+    # Each freq has an ``enabled`` flag: disabled freqs are KEPT (so you can toggle them on
+    # later) but excluded from the active rtl_airband scan.
     freqs: list = field(default_factory=lambda: [
-        {"mhz": 118.300, "label": "TWR"},
-        {"mhz": 119.100, "label": "APP"},
-        {"mhz": 121.750, "label": "GND"},
+        {"mhz": 118.300, "label": "TWR", "enabled": True},
+        {"mhz": 119.100, "label": "APP", "enabled": True},
+        {"mhz": 121.750, "label": "GND", "enabled": True},
     ])
     gain: float = 33.0
     squelch_snr: float = 9.0           # dB above noise floor (≈ rtl_airband's prior auto default); 0 = auto/off
@@ -223,7 +225,7 @@ class Config:
         """
         freqs = []
         for r in self.airband.freqs:
-            if isinstance(r, dict) and "mhz" in r:
+            if isinstance(r, dict) and "mhz" in r and r.get("enabled", True):   # skip disabled
                 try:
                     freqs.append(float(r["mhz"]))
                 except (TypeError, ValueError):
@@ -316,7 +318,8 @@ class Config:
                     continue
                 if not (108.0 <= mhz <= 137.0):     # VHF airband only
                     continue
-                clean.append({"mhz": round(mhz, 3), "label": str(row.get("label", ""))[:8]})
+                clean.append({"mhz": round(mhz, 3), "label": str(row.get("label", ""))[:8],
+                              "enabled": bool(row.get("enabled", True))})
             if clean:                               # never accept empty — keep last-good
                 self.airband.freqs = clean
 
