@@ -137,6 +137,24 @@ python3 tools/build_navdata.py --lat 47.45 --lon -122.31
 > Source data is the open X‑Plane navdata (~2012 cycle), so a few recent terminal waypoints may
 > differ from current charts; the enroute airway network is stable.
 
+### Scheduled arrivals/departures (optional)
+
+The map's **Flights** layer lists the airport's arrivals/departures. By default it uses
+**[OpenSky](https://opensky-network.org)** (free, no key) — *recent observed* traffic from the
+last few hours. For a real **scheduled** timetable (airline, flight number, scheduled time,
+status), switch it to **AeroDataBox**:
+
+1. Sign up at [RapidAPI](https://rapidapi.com) and subscribe to
+   [**AeroDataBox**](https://rapidapi.com/aedbx-aedbx/api/aerodatabox) — the free *Basic* plan is
+   plenty.
+2. Copy your **RapidAPI key** (the `X-RapidAPI-Key` value shown on the endpoint page).
+3. Set it as the **`FLIGHTS_API_KEY`** variable (Device/Fleet → Variables). The container
+   restarts and the layer switches to scheduled data (its header then reads *"scheduled"*).
+
+Usage is light: **one airport call per refresh** returns *every* arrival and departure at once
+(never one-per-aircraft), it's **cached ~30 min**, and it only fetches **while the layer is
+open** — so it stays well inside the free tier for normal use.
+
 ### Auto‑deploy with GitHub Actions (optional)
 
 [`.github/workflows/balena-deploy.yml`](.github/workflows/balena-deploy.yml) pushes a release on

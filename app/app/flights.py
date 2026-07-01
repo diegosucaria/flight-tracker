@@ -16,7 +16,9 @@ import re
 import time
 from datetime import datetime, timedelta
 
-_TTL_S = 600.0            # refresh at most every 10 min
+_TTL_S = 1800.0          # refresh at most every 30 min — ONE airport call returns every
+                         #   arrival/departure, so this bounds AeroDataBox usage well inside
+                         #   the free tier (a 12 h schedule barely changes in 30 min)
 _MAX = 8                  # rows shown per list
 _cache: dict = {"t": 0.0, "icao": None, "data": None}
 
