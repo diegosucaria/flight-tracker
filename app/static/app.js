@@ -376,7 +376,7 @@ map.on("overlayremove", (e) => { if (e.layer === flightsLayer) _flightsCtrl(null
 setInterval(refreshFlights, 10 * 60 * 1000);   // OpenSky /flights is rate-limited + slow-moving
 
 /* ---------- ADS-B coverage layer: reception envelope from stored history ---------- */
-let _coverageData = null, _covCtrlOn = false, _covHours = 24;
+let _coverageData = null, _covCtrlOn = false, _covHours = 24, _covMode = "preset", _covFrom = "", _covTo = "";
 const coverageControl = L.control({ position: "bottomleft" });
 coverageControl.onAdd = function () {
   this._d = L.DomUtil.create("div", "metar-box cov-box");
@@ -387,34 +387,58 @@ function _covCtrl(html) {
   if (html != null) {
     if (!_covCtrlOn) { coverageControl.addTo(map); _covCtrlOn = true; }
     coverageControl._d.innerHTML = html;
-    const sel = document.getElementById("cov-hours");
-    if (sel) sel.onchange = () => { _covHours = +sel.value || 24; refreshCoverage(); };
+    const sel = document.getElementById("cov-tf-sel");
+    if (sel) sel.onchange = () => {
+      if (sel.value === "custom") { _covMode = "custom"; drawCoverage(); }   // reveal the date inputs
+      else { _covMode = "preset"; _covHours = +sel.value || 24; refreshCoverage(); }
+    };
+    const f = document.getElementById("cov-from"), t = document.getElementById("cov-to");
+    const onDate = () => {
+      _covFrom = (f && f.value) || ""; _covTo = (t && t.value) || "";
+      if (_covFrom && _covTo) refreshCoverage();             // fetch once both dates are set
+    };
+    if (f) f.onchange = onDate;
+    if (t) t.onchange = onDate;
   } else if (_covCtrlOn) { map.removeControl(coverageControl); _covCtrlOn = false; }
 }
 function coverageBoxHtml(c) {
   const opts = [[1, "1 h"], [6, "6 h"], [24, "24 h"], [168, "7 d"], [720, "30 d"]];
+  const sel = `<select id="cov-tf-sel">`
+    + opts.map(([v, l]) => `<option value="${v}"${_covMode === "preset" && v === _covHours ? " selected" : ""}>${l}</option>`).join("")
+    + `<option value="custom"${_covMode === "custom" ? " selected" : ""}>Custom…</option></select>`;
+  const dates = _covMode === "custom"
+    ? `<div class="cov-dates"><label>from <input type="date" id="cov-from" value="${esc(_covFrom)}"></label>`
+      + `<label>to <input type="date" id="cov-to" value="${esc(_covTo)}"></label></div>`
+    : "";
   return `<div class="metar-hd">ADS-B coverage</div>`
-    + `<label class="cov-tf">timeframe <select id="cov-hours">`
-    + opts.map(([v, l]) => `<option value="${v}"${v === _covHours ? " selected" : ""}>${l}</option>`).join("")
-    + `</select></label>`
+    + `<label class="cov-tf">timeframe ${sel}</label>${dates}`
     + `<div class="cov-stat">max range <b>${c.max_km != null ? c.max_km + " km" : "—"}</b></div>`
     + `<div class="cov-stat">positions <b>${(c.count || 0).toLocaleString()}</b></div>`
     + `<div class="metar-fav">envelope = farthest plane seen per direction</div>`;
 }
 function drawCoverage() {
   coverageLayer.clearLayers();
-  const c = _coverageData;
-  if (!map.hasLayer(coverageLayer) || !c || !c.rx || !Array.isArray(c.range_km)) { _covCtrl(null); return; }
-  const rx = c.rx;
-  const pts = c.range_km.map((km, i) => km > 0 ? destPoint(rx.lat, rx.lon, i * 5, km) : [rx.lat, rx.lon]);
-  L.polygon(pts, { color: "#22d3ee", weight: 1.5, fillColor: "#22d3ee",
-    fillOpacity: 0.12, interactive: false }).addTo(coverageLayer);
-  _covCtrl(coverageBoxHtml(c));
+  if (!map.hasLayer(coverageLayer)) { _covCtrl(null); return; }
+  const c = _coverageData || { max_km: null, count: 0 };
+  if (c.rx && Array.isArray(c.range_km)) {
+    const rx = c.rx;
+    const pts = c.range_km.map((km, i) => km > 0 ? destPoint(rx.lat, rx.lon, i * 5, km) : [rx.lat, rx.lon]);
+    L.polygon(pts, { color: "#22d3ee", weight: 1.5, fillColor: "#22d3ee",
+      fillOpacity: 0.12, interactive: false }).addTo(coverageLayer);
+  }
+  _covCtrl(coverageBoxHtml(c));      // keep the box (+ its controls) visible while the layer is on
 }
 async function refreshCoverage() {
   if (!map.hasLayer(coverageLayer)) return;
+  let url = "api/coverage?hours=" + _covHours;
+  if (_covMode === "custom") {
+    if (!_covFrom || !_covTo) return;                        // need both dates first
+    const s = Math.floor(new Date(_covFrom + "T00:00:00").getTime() / 1000);
+    const e = Math.floor(new Date(_covTo + "T23:59:59").getTime() / 1000);
+    url = `api/coverage?start=${s}&end=${e}`;
+  }
   try {
-    const r = await fetch("api/coverage?hours=" + _covHours, { cache: "no-store" });
+    const r = await fetch(url, { cache: "no-store" });
     _coverageData = r.ok ? await r.json() : null;
   } catch (e) { /* keep last-known */ }
   drawCoverage();

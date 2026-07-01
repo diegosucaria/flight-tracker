@@ -605,13 +605,13 @@ async def api_metar() -> JSONResponse:
     return JSONResponse(data or {})
 
 
-def _compute_coverage(since: int, rx_lat: float, rx_lon: float) -> dict:
-    """Max reception range per 5° bearing bin (72 bins) over the recorded positions."""
+def _compute_coverage(start: int, end: int, rx_lat: float, rx_lon: float) -> dict:
+    """Max reception range per 5° bearing bin (72 bins) over the recorded positions in a window."""
     BINS = 72
     rng = [0.0] * BINS
     count = 0
     maxkm = 0.0
-    for r in history.positions_since(since):
+    for r in history.positions_between(start, end):
         la, lo = r.get("lat"), r.get("lon")
         if not isinstance(la, (int, float)) or not isinstance(lo, (int, float)):
             continue
@@ -627,14 +627,20 @@ def _compute_coverage(since: int, rx_lat: float, rx_lon: float) -> dict:
 
 
 @app.get("/api/coverage")
-async def api_coverage(hours: float = 24.0) -> JSONResponse:
+async def api_coverage(hours: float = 24.0, start: int = 0, end: int = 0) -> JSONResponse:
     """ADS-B reception envelope (max range per bearing) from stored history — for comparing
-    antenna positions. Scans the position table off the event loop."""
-    hours = max(0.1, min(720.0, hours))
-    since = int(time.time() - hours * 3600)
+    antenna positions. Pass ``hours`` (last N hours) OR an explicit ``start``/``end`` unix
+    window (to compare specific days). Scans the position table off the event loop."""
+    now = int(time.time())
+    if start and end and end > start:
+        s, e = int(start), int(end)
+    else:
+        hours = max(0.1, min(720.0, hours))
+        s, e = int(now - hours * 3600), now
     rx_lat, rx_lon = receiver_pos()
-    data = await asyncio.to_thread(_compute_coverage, since, rx_lat, rx_lon)
+    data = await asyncio.to_thread(_compute_coverage, s, e, rx_lat, rx_lon)
     data["hours"] = hours
+    data["start"], data["end"] = s, e
     return JSONResponse(data)
 
 
