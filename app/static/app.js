@@ -293,8 +293,8 @@ function metarBoxHtml(m) {
     + (rows ? `<table class="metar-rwy">${rows}</table>` : "")
     + (rows ? `<div class="metar-fav">★ wind-favoured runway</div>` : "");
 }
-// the METAR box is a fixed corner panel (bottom-left), not a popup over the airport
-const metarControl = L.control({ position: "bottomleft" });
+// the METAR box is a fixed corner panel (top-left), not a popup over the airport
+const metarControl = L.control({ position: "topleft" });
 metarControl.onAdd = function () {
   this._d = L.DomUtil.create("div", "metar-box");
   L.DomEvent.disableClickPropagation(this._d);
@@ -343,20 +343,17 @@ function _flightsCtrl(html) {
     flightsControl._d.innerHTML = html;
   } else if (_flightsCtrlOn) { map.removeControl(flightsControl); _flightsCtrlOn = false; }
 }
-function _hm(ts) {
-  if (!ts) return "";
-  const d = new Date(ts * 1000);
-  return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
-}
 function flightsBoxHtml(f) {
   const rows = (list, arrow) => (list && list.length)
-    ? list.map((x) => `<tr><td>${_hm(x.time)}</td><td>${esc(x.callsign || "—")}</td>`
+    ? list.map((x) => `<tr title="${esc([x.airline, x.status].filter(Boolean).join(" · "))}">`
+        + `<td>${esc(x.when || "")}</td><td>${esc(x.callsign || "—")}</td>`
         + `<td class="fl-ap">${arrow} ${esc(x.other || "?")}</td></tr>`).join("")
     : `<tr><td colspan="3" class="muted">— none —</td></tr>`;
-  return `<div class="metar-hd">${esc(f.icao || "Flights")} · recent ${f.window_h || 3}h</div>`
+  const label = f.scheduled ? "scheduled" : "recent";
+  return `<div class="metar-hd">${esc(f.icao || "Flights")} · ${label} ${f.window_h || 3}h</div>`
     + `<div class="fl-sub">Arrivals</div><table class="fl-tbl">${rows(f.arrivals, "←")}</table>`
     + `<div class="fl-sub">Departures</div><table class="fl-tbl">${rows(f.departures, "→")}</table>`
-    + `<div class="metar-fav">observed (ADS-B), not a schedule</div>`;
+    + `<div class="metar-fav">${f.scheduled ? "scheduled · AeroDataBox" : "observed (ADS-B), not a schedule"}</div>`;
 }
 function drawFlights() {
   const f = _flightsData;
@@ -375,6 +372,12 @@ async function refreshFlights() {
 map.on("overlayadd", (e) => { if (e.layer === flightsLayer) refreshFlights(); });
 map.on("overlayremove", (e) => { if (e.layer === flightsLayer) _flightsCtrl(null); });
 setInterval(refreshFlights, 10 * 60 * 1000);   // OpenSky /flights is rate-limited + slow-moving
+
+// Layers restored from saved prefs on page load are added programmatically, which does
+// NOT fire the layer control's overlayadd — so kick off an initial fetch for any corner-box
+// layer that came back ON. (Both early-return if their layer is off.)
+refreshMetar();
+refreshFlights();
 
 /* ---------- /api/aircraft polling ---------- */
 async function pollAircraft() {

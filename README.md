@@ -160,6 +160,7 @@ none of these beyond the getting-started ones and configure everything in the UI
 | `READSB_LAT`, `READSB_LON` | Receiver lat / lon | Receiver position (live GPS overrides this when enabled). `RECEIVER_LAT` / `RECEIVER_LON` are also accepted. |
 | `AIRPORT_LAT`, `AIRPORT_LON`, `AIRPORT_ELEV_FT` | Airport lat / lon | Pin the airport location/elevation instead of resolving it from the ICAO. |
 | `ROUTE_API` | — | Route-enrichment source (`adsbdb`, the default). |
+| `FLIGHTS_API_KEY` | — | RapidAPI key for [AeroDataBox](https://rapidapi.com/aedbx-aedbx/api/aerodatabox) → the map's **Flights** layer shows **scheduled** arrivals/departures. Without it, that layer falls back to OpenSky's recent *observed* traffic (free, no key). |
 | `READSB_ALT` | — | Receiver altitude (used by the decoder). |
 | `TZ` | — | Timezone, e.g. `America/Los_Angeles`. |
 
