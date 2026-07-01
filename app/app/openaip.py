@@ -52,6 +52,8 @@ def _clean(items) -> list[dict]:
         if len(ring) < 3:
             continue
         name = a.get("name") or ""
+        if name.upper().startswith(("FIR", "UIR")):
+            continue                                  # region-wide info regions — would tint the whole map
         out.append({
             "name": name,
             "class": _ICAO_CLASS.get(a.get("icaoClass")),
