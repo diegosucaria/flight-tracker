@@ -69,6 +69,7 @@ const airwayLayer  = L.layerGroup();   // aviation overlays (bundled navdata) �
 const navaidLayer  = L.layerGroup();
 const fixLayer     = L.layerGroup();
 const metarLayer   = L.layerGroup();   // airport METAR + per-runway wind — off by default
+const flightsLayer = L.layerGroup();   // recent arrivals/departures (OpenSky) — off by default
 
 // Layer switcher (top-right): pick a basemap + toggle the data overlays.
 L.control.layers(baseLayers, {
@@ -77,6 +78,7 @@ L.control.layers(baseLayers, {
   "Runways": runwayLayer,
   "Flight trails": trailLayer,
   "Weather (METAR)": metarLayer,
+  "Flights (recent)": flightsLayer,
   "Airways": airwayLayer,
   "Navaids": navaidLayer,
   "Fixes": fixLayer,
@@ -86,8 +88,8 @@ L.control.layers(baseLayers, {
 const _LAYERS_KEY = "ft.map.layers.v1";
 const _overlays = {
   "Watch sector": sectorLayer, "Proximity": proxLayer, "Runways": runwayLayer,
-  "Flight trails": trailLayer, "Weather (METAR)": metarLayer, "Airways": airwayLayer,
-  "Navaids": navaidLayer, "Fixes": fixLayer,
+  "Flight trails": trailLayer, "Weather (METAR)": metarLayer, "Flights (recent)": flightsLayer,
+  "Airways": airwayLayer, "Navaids": navaidLayer, "Fixes": fixLayer,
 };
 function _saveLayerPrefs() {
   const on = Object.keys(_overlays).filter((n) => map.hasLayer(_overlays[n]));
@@ -327,6 +329,53 @@ map.on("overlayadd", (e) => { if (e.layer === metarLayer) refreshMetar(); });
 map.on("overlayremove", (e) => { if (e.layer === metarLayer) { metarLayer.clearLayers(); _metarCtrl(null); } });
 setInterval(refreshMetar, 5 * 60 * 1000);   // METARs update ~hourly; refresh every 5 min while shown
 
+/* ---------- flights layer: recent arrivals/departures (OpenSky, observed) ---------- */
+let _flightsData = null, _flightsCtrlOn = false;
+const flightsControl = L.control({ position: "bottomright" });
+flightsControl.onAdd = function () {
+  this._d = L.DomUtil.create("div", "metar-box flights-box");
+  L.DomEvent.disableClickPropagation(this._d);
+  return this._d;
+};
+function _flightsCtrl(html) {
+  if (html != null) {
+    if (!_flightsCtrlOn) { flightsControl.addTo(map); _flightsCtrlOn = true; }
+    flightsControl._d.innerHTML = html;
+  } else if (_flightsCtrlOn) { map.removeControl(flightsControl); _flightsCtrlOn = false; }
+}
+function _hm(ts) {
+  if (!ts) return "";
+  const d = new Date(ts * 1000);
+  return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+}
+function flightsBoxHtml(f) {
+  const rows = (list, arrow) => (list && list.length)
+    ? list.map((x) => `<tr><td>${_hm(x.time)}</td><td>${esc(x.callsign || "—")}</td>`
+        + `<td class="fl-ap">${arrow} ${esc(x.other || "?")}</td></tr>`).join("")
+    : `<tr><td colspan="3" class="muted">— none —</td></tr>`;
+  return `<div class="metar-hd">${esc(f.icao || "Flights")} · recent ${f.window_h || 3}h</div>`
+    + `<div class="fl-sub">Arrivals</div><table class="fl-tbl">${rows(f.arrivals, "←")}</table>`
+    + `<div class="fl-sub">Departures</div><table class="fl-tbl">${rows(f.departures, "→")}</table>`
+    + `<div class="metar-fav">observed (ADS-B), not a schedule</div>`;
+}
+function drawFlights() {
+  const f = _flightsData;
+  if (!map.hasLayer(flightsLayer) || !f || !f.icao) { _flightsCtrl(null); return; }
+  _flightsCtrl(flightsBoxHtml(f));
+}
+async function refreshFlights() {
+  if (!map.hasLayer(flightsLayer)) return;
+  try {
+    const r = await fetch("api/flights", { cache: "no-store" });
+    const d = r.ok ? await r.json() : null;
+    _flightsData = (d && d.icao) ? d : null;
+  } catch (e) { /* keep last-known */ }
+  drawFlights();
+}
+map.on("overlayadd", (e) => { if (e.layer === flightsLayer) refreshFlights(); });
+map.on("overlayremove", (e) => { if (e.layer === flightsLayer) _flightsCtrl(null); });
+setInterval(refreshFlights, 10 * 60 * 1000);   // OpenSky /flights is rate-limited + slow-moving
+
 /* ---------- /api/aircraft polling ---------- */
 async function pollAircraft() {
   try {
@@ -480,8 +529,10 @@ function renderFeatured(featured) {
   if (featured.landed)     tags.push('<span class="tag win">LANDED</span>');
   if (featured.military)   tags.push('<span class="tag mil">MILITARY</span>');
   if (featured.is_arrival && !featured.landed) tags.push('<span class="tag arr">ARRIVAL</span>');
-  if (featured.is_departure) tags.push('<span class="tag dep">DEPARTURE</span>');
-  const _rwy = featured.landing_runway || featured.departure_runway;
+  if (featured.depart_phase === "takeoff")       tags.push('<span class="tag dep">TAKING OFF</span>');
+  else if (featured.depart_phase === "climbout") tags.push('<span class="tag dep">TOOK OFF</span>');
+  // departure runway badge disappears once past 10k ft (depart_phase clears); arrivals keep theirs
+  const _rwy = featured.landing_runway || (featured.depart_phase ? featured.departure_runway : null);
   if (_rwy) {
     const _k = featured.landing_runway ? "ARR" : "DEP";
     tags.push(featured.window_visible

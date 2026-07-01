@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .airband import airband_status, apply_airband_config, test_beep, write_airband_conf, write_volume
-from . import navdata, metar
+from . import navdata, metar, flights
 from .airports import home_airport_coords, home_codes, resolve_airport
 from .config import Config
 from .enrich import aircraft_info, route_for_callsign
@@ -301,9 +301,25 @@ async def _enrich_featured(featured: dict, client: httpx.AsyncClient, airport: d
     featured["duration_est_min"] = _estimate_duration_min(featured, route)
     featured["duration_is_estimate"] = True
     featured["eta_min"] = _eta_to_airport_min(featured)
+    featured["depart_phase"] = _departure_phase(featured, getattr(cfg, "airport_elev_ft", 0.0))
 
     featured["featured"] = True
     return featured
+
+
+def _departure_phase(ac: dict, elev: float) -> str | None:
+    """Drives the TAKING OFF -> TOOK OFF -> gone lifecycle for a departing featured flight.
+
+    'takeoff'  = just lifted off (< 1500 ft AGL);
+    'climbout' = climbing away (still <= 10000 ft MSL);
+    None       = not departing, or past 10000 ft MSL (message + runway badge disappear).
+    """
+    if not ac.get("is_departure"):
+        return None
+    alt = ac.get("alt_baro")
+    if not isinstance(alt, (int, float)) or alt > 10000.0:
+        return None
+    return "takeoff" if (alt - (elev or 0.0)) < 1500.0 else "climbout"
 
 
 async def tick(client: httpx.AsyncClient) -> None:
@@ -586,6 +602,14 @@ async def api_metar() -> JSONResponse:
     """Home-airport METAR + per-runway head/cross-wind (for the weather map layer)."""
     async with httpx.AsyncClient() as client:
         data = await metar.get_metar(cfg.home_airport, runways_for(cfg.home_airport), client)
+    return JSONResponse(data or {})
+
+
+@app.get("/api/flights")
+async def api_flights() -> JSONResponse:
+    """Recent (observed, ~3h) arrivals/departures at the home airport — OpenSky, not a schedule."""
+    async with httpx.AsyncClient() as client:
+        data = await flights.get_flights(cfg.home_airport, client)
     return JSONResponse(data or {})
 
 

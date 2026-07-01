@@ -251,9 +251,11 @@ def _field_text(featured, f):
 
 def _scroll_string(featured, fields) -> str:
     parts = [t for t in (_field_text(featured, f) for f in (fields or [])) if t]
-    if featured.get("is_departure"):                  # flag a departing flight in the scroller
+    phase = featured.get("depart_phase")              # TAKING OFF -> TOOK OFF -> (gone over 10k)
+    if phase:
         dep = featured.get("departure_runway")
-        parts.insert(0, "TAKING OFF" + (f" {dep}" if dep else ""))
+        verb = "TAKING OFF" if phase == "takeoff" else "TOOK OFF"
+        parts.insert(0, verb + (f" {dep}" if dep else ""))
     return "   ".join(str(p) for p in parts)
 
 

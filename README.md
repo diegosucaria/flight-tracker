@@ -40,7 +40,8 @@ small web UI.
   for your airport (no hardcoded tables).
 - **Live map web UI** — Leaflet map with aircraft, trails, your watch sector, runways + extended
   centerlines, a **Weather (METAR)** layer showing airport wind + the head/cross-wind on each
-  runway (which one the wind favours), and toggleable **Airways / Navaids / Fixes** overlays.
+  runway (which one the wind favours), a **Flights (recent)** layer with the last few hours'
+  observed arrivals/departures, and toggleable **Airways / Navaids / Fixes** overlays.
 - **Flight history** — every observed flight saved to SQLite; browse, filter, and replay tracks.
 - **Tower-comms audio** *(optional)* — a 2nd SDR runs `rtl_airband` over your airport's VHF
   frequencies and plays it to a USB speaker.
@@ -208,6 +209,8 @@ Copy [`.env.example`](.env.example) to `.env` for the full set of variables.
 - **[hzeller/rpi-rgb-led-matrix](https://github.com/hzeller/rpi-rgb-led-matrix)** — LED panel driver.
 - **[sdr-enthusiasts](https://github.com/sdr-enthusiasts)** — the ultrafeeder, airspy_adsb, and rtl_airband container images.
 - Route enrichment via [adsbdb](https://www.adsbdb.com) / [adsb.lol](https://api.adsb.lol).
+- **[aviationweather.gov](https://aviationweather.gov)** — airport METAR (public domain).
+- **[OpenSky Network](https://opensky-network.org)** — recent arrivals/departures (observed, not scheduled).
 
 > ⚠️ **Airband legality is per‑country** — listening to aviation radio is restricted in some
 > places (e.g. Germany). Check your local rules before enabling the tower-comms feature.
