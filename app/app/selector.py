@@ -17,6 +17,12 @@ _HYSTERESIS_KM = 5.0
 # ...or this much lower (ft) — a markedly lower plane wins even if slightly farther.
 _HYSTERESIS_ALT_FT = 1500.0
 
+# A near-ground target more than this far (km) from the home airport can't be on ITS approach/
+# departure (it's way below the glidepath for that distance) — it's a plane at another field or a
+# low helicopter. Dropped from "featured" so it can't out-"lowest" a real arrival (kept if proximity).
+_GROUND_CLUTTER_AGL_FT = 250.0
+_GROUND_CLUTTER_MIN_APT_KM = 8.0
+
 # ADS-B emitter categories counted as "general aviation" (skipped when hide_general_aviation):
 # A1 = light (<15500 lb), A7 = rotorcraft, B1 glider, B2 lighter-than-air, B3 parachutist,
 # B4 ultralight, B6 UAV, B7 space. Kept: A0 (unknown), A2 small/bizjet, A3-A6 airliners/large.
@@ -189,6 +195,12 @@ def pick_featured(aircraft: list[dict], cfg, last_hex: str | None = None) -> dic
                 continue                              # skip hex-only targets (no flight ID)
             if getattr(cfg, "hide_general_aviation", False) and ac.get("category") in _GA_CATEGORIES:
                 continue                              # skip light GA / rotorcraft / gliders
+            # Ground clutter at ANOTHER field — near-ground yet far from the home airport.
+            elev = getattr(cfg, "airport_elev_ft", 0.0) or 0.0
+            dapt = ac.get("distance_to_airport_km")
+            if (alt_ft(ac) - elev) < _GROUND_CLUTTER_AGL_FT \
+                    and isinstance(dapt, (int, float)) and dapt > _GROUND_CLUTTER_MIN_APT_KM:
+                continue
         if not _passes_traffic_mode(ac, cfg):         # traffic_mode applies to both sectors
             continue
         in_watch = (cfg.watch.min_km <= ac["distance_km"] <= cfg.watch.max_km
