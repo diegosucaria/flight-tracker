@@ -311,6 +311,23 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 22px; cu
 .freq-row .f-label { flex: 1 1 auto; min-width: 0; }
 .freq-row .f-del { padding: 2px 9px; line-height: 1; }
 .freq-row.disabled .f-mhz, .freq-row.disabled .f-label { opacity: 0.4; }
+
+/* weather (METAR) layer */
+.wind-icon { text-align: center; }
+.wind-arr-wrap { display: block; height: 22px; }
+.wind-arr { display: inline-block; font-size: 20px; line-height: 22px; color: #38bdf8; text-shadow: 0 0 3px #000, 0 0 3px #000; }
+.wind-txt { display: inline-block; margin-top: 1px; font-size: 11px; font-weight: 600; color: #e2e8f0;
+  background: rgba(15, 23, 42, 0.8); padding: 1px 6px; border-radius: 7px; white-space: nowrap; }
+.metar-popup .metar-raw { font-family: ui-monospace, monospace; font-size: 11px; margin: 4px 0; color: #94a3b8; }
+.metar-popup .metar-wind { font-size: 12px; margin-bottom: 4px; }
+.metar-rwy { font-size: 12px; border-collapse: collapse; margin-top: 2px; }
+.metar-rwy td { padding: 1px 8px 1px 0; }
+.metar-rwy .tw { color: #f87171; }
+
+/* env-locked config fields (an env var overrides the UI) */
+.field.env-locked { opacity: 0.6; }
+.field.env-locked .field-label::after { content: " · 🔒 env"; font-size: 10px; opacity: 0.85; }
+.field.env-locked input, .field.env-locked select { cursor: not-allowed; }
 .freq-controls { gap: 10px; margin: 6px 0; align-items: center; }
 .gain-lbl { font-size: 12px; color: var(--muted, #8b93a7); display: flex; align-items: center; gap: 5px; }
 .gain-lbl input { width: 4.5em; }

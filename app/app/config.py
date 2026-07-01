@@ -213,6 +213,45 @@ class Config:
     _MATRIX_LIMITS = {"refresh_hz": (0, 1000), "pwm_bits": (1, 11), "pwm_lsb_ns": (50, 400),
                       "gpio_slowdown": (0, 6), "pwm_dither_bits": (0, 2)}
 
+    # Config field -> env var name(s) that OVERRIDE the UI when set (first match wins).
+    # A set env var forces the field and locks the matching UI input (greyed out).
+    _ENV_OVERRIDES = {
+        "lat": ("READSB_LAT", "RECEIVER_LAT"),
+        "lon": ("READSB_LON", "RECEIVER_LON"),
+        "home_airport": ("HOME_AIRPORT",),
+        "airport_lat": ("AIRPORT_LAT",),
+        "airport_lon": ("AIRPORT_LON",),
+        "airport_elev_ft": ("AIRPORT_ELEV_FT",),
+        "route_api": ("ROUTE_API",),
+    }
+    _ENV_FLOAT_FIELDS = frozenset({"lat", "lon", "airport_lat", "airport_lon", "airport_elev_ft"})
+
+    @classmethod
+    def _env_value(cls, field_name: str):
+        """Parsed env-override value for a field, or None if no matching env var is set."""
+        for name in cls._ENV_OVERRIDES.get(field_name, ()):
+            v = os.environ.get(name)
+            if v:
+                if field_name in cls._ENV_FLOAT_FIELDS:
+                    try:
+                        return float(v)
+                    except ValueError:
+                        continue
+                return v
+        return None
+
+    def env_locked(self) -> set:
+        """Fields currently forced by an env var — the UI must show these as read-only."""
+        return {f for f in self._ENV_OVERRIDES if self._env_value(f) is not None}
+
+    def apply_env_overrides(self) -> "Config":
+        """Force every env-set field over the persisted/UI value. Env wins. Returns self."""
+        for f in self._ENV_OVERRIDES:
+            v = self._env_value(f)
+            if v is not None:
+                setattr(self, f, v)
+        return self
+
     def to_dict(self) -> dict:
         """Plain-JSON view of the config (nested watch included) for the API."""
         return asdict(self)
@@ -249,8 +288,9 @@ class Config:
         """
         if not isinstance(partial, dict):
             return self
+        locked = self.env_locked()               # env-overridden fields are read-only
         for key in self._MERGEABLE:
-            if key in partial:
+            if key in partial and key not in locked:
                 setattr(self, key, partial[key])
         watch = partial.get("watch")
         if isinstance(watch, dict):
@@ -334,10 +374,10 @@ class Config:
             with open(path) as f:
                 data = json.load(f)
         except FileNotFoundError:
-            return cls()
+            return cls().apply_env_overrides()
         except ValueError as exc:
             print(f"[config] {path} unreadable ({exc}); using defaults")
-            return cls()
+            return cls().apply_env_overrides()
 
         def _only(dc, d):     # keep only fields the dataclass declares
             names = {f.name for f in fields(dc)}
@@ -356,7 +396,7 @@ class Config:
             # Drop unknown/stale top-level keys too, so a future field rename can't make
             # __init__ raise and silently wipe the entire saved config back to defaults.
             return cls(watch=watch, proximity=proximity, panel=panel, airband=airband,
-                       matrix=matrix, **_only(cls, data))
+                       matrix=matrix, **_only(cls, data)).apply_env_overrides()
         except (TypeError, ValueError) as exc:
             print(f"[config] {path} incompatible ({exc}); using defaults")
-            return cls()
+            return cls().apply_env_overrides()

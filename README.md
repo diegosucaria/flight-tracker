@@ -39,7 +39,8 @@ small web UI.
   an arrival passes your window or lands on the far side. Runway geometry is resolved at runtime
   for your airport (no hardcoded tables).
 - **Live map web UI** — Leaflet map with aircraft, trails, your watch sector, runways + extended
-  centerlines, and toggleable **Airways / Navaids / Fixes** aviation-chart overlays.
+  centerlines, a **Weather (METAR)** layer showing airport wind + the head/cross-wind on each
+  runway (which one the wind favours), and toggleable **Airways / Navaids / Fixes** overlays.
 - **Flight history** — every observed flight saved to SQLite; browse, filter, and replay tracks.
 - **Tower-comms audio** *(optional)* — a 2nd SDR runs `rtl_airband` over your airport's VHF
   frequencies and plays it to a USB speaker.
@@ -93,13 +94,18 @@ You need a free [balenaCloud](https://www.balena.io) account (or any way to run
 
 1. **Create a fleet** in balenaCloud (Raspberry Pi 5 / 64‑bit), add a device, and flash the
    downloaded balenaOS image to the microSD ([balenaEtcher](https://etcher.balena.io)).
-2. **Set Fleet variables** (Device/Fleet → Variables):
+2. **Set variables** (Device/Fleet → Variables) — *optional*: everything here can also be set
+   in the web UI. **Any variable you set overrides the matching UI field** (which then greys out
+   with a 🔒). The common ones to get started:
    | Variable | Example | Meaning |
    |----------|---------|---------|
    | `HOME_AIRPORT` | `KSEA` | Your airport's ICAO — coords + runways are resolved from it. |
    | `READSB_LAT` / `READSB_LON` | `47.45` / `-122.31` | Receiver position (fallback if no GPS). |
    | `READSB_ALT` | `40m` | Receiver altitude. |
    | `TZ` | `America/Los_Angeles` | Your timezone. |
+
+   The full list — including how to pin the airport coordinates and route API — is in
+   **[Environment variables](#environment-variables)** below.
 3. **Deploy:** clone this repo and `balena push <you>/<fleet>` (or wire up the GitHub Action
    below). The containers build and start.
 4. **Configure in the browser:** open `http://<device-ip>` and set your watch sector, display
@@ -137,6 +143,36 @@ every push to `main`. In your repo settings add:
 
 - Secret **`BALENA_TOKEN`** — a balenaCloud API key.
 - Variable **`BALENA_FLEET`** — your fleet slug, e.g. `youruser/flight-tracker`.
+
+## Environment variables
+
+Every app setting can be configured in the **web UI** and is stored on the device. Setting the
+matching **environment variable overrides the UI** for that field — the UI then shows it
+read-only (greyed out, 🔒). Leave a variable unset to manage it from the browser. Most people set
+none of these beyond the getting-started ones and configure everything in the UI.
+
+**App configuration** — override the corresponding UI field when set:
+
+| Variable | UI field | Meaning |
+|----------|----------|---------|
+| `HOME_AIRPORT` | Home airport | Airport ICAO; coords + runways resolve from [OurAirports](https://ourairports.com). |
+| `READSB_LAT`, `READSB_LON` | Receiver lat / lon | Receiver position (live GPS overrides this when enabled). `RECEIVER_LAT` / `RECEIVER_LON` are also accepted. |
+| `AIRPORT_LAT`, `AIRPORT_LON`, `AIRPORT_ELEV_FT` | Airport lat / lon | Pin the airport location/elevation instead of resolving it from the ICAO. |
+| `ROUTE_API` | — | Route-enrichment source (`adsbdb`, the default). |
+| `READSB_ALT` | — | Receiver altitude (used by the decoder). |
+| `TZ` | — | Timezone, e.g. `America/Los_Angeles`. |
+
+**Deploy** (GitHub Action — see below):
+
+| Variable | Meaning |
+|----------|---------|
+| `BALENA_TOKEN` *(secret)* | balenaCloud API key. |
+| `BALENA_FLEET` | Fleet slug, e.g. `youruser/flight-tracker`. |
+
+**Advanced / internal** (sensible defaults; rarely changed): `POLL_SECONDS`, `AIRCRAFT_JSON_URL`
+(point the app at a tar1090 feed for local dev), `GPSD_HOST` / `GPSD_PORT`, `CONFIG_PATH`,
+`NAVDATA_PATH`, `HISTORY_DB_PATH` / `HISTORY_POSITION_DAYS`, plus the airband/watchdog service
+knobs. See [`.env.example`](.env.example) for the annotated full set.
 
 ## Local development
 

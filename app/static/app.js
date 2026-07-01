@@ -68,6 +68,7 @@ const acLayer      = L.layerGroup().addTo(map);
 const airwayLayer  = L.layerGroup();   // aviation overlays (bundled navdata) — off by default
 const navaidLayer  = L.layerGroup();
 const fixLayer     = L.layerGroup();
+const metarLayer   = L.layerGroup();   // airport METAR + per-runway wind — off by default
 
 // Layer switcher (top-right): pick a basemap + toggle the data overlays.
 L.control.layers(baseLayers, {
@@ -75,6 +76,7 @@ L.control.layers(baseLayers, {
   "Proximity": proxLayer,
   "Runways": runwayLayer,
   "Flight trails": trailLayer,
+  "Weather (METAR)": metarLayer,
   "Airways": airwayLayer,
   "Navaids": navaidLayer,
   "Fixes": fixLayer,
@@ -84,7 +86,8 @@ L.control.layers(baseLayers, {
 const _LAYERS_KEY = "ft.map.layers.v1";
 const _overlays = {
   "Watch sector": sectorLayer, "Proximity": proxLayer, "Runways": runwayLayer,
-  "Flight trails": trailLayer, "Airways": airwayLayer, "Navaids": navaidLayer, "Fixes": fixLayer,
+  "Flight trails": trailLayer, "Weather (METAR)": metarLayer, "Airways": airwayLayer,
+  "Navaids": navaidLayer, "Fixes": fixLayer,
 };
 function _saveLayerPrefs() {
   const on = Object.keys(_overlays).filter((n) => map.hasLayer(_overlays[n]));
@@ -259,6 +262,60 @@ function drawSites(rx, ap) {
   }
 }
 
+/* ---------- weather layer: airport METAR + per-runway wind ---------- */
+let _airportLL = null, _metarData = null;
+
+function _wDir(m) {
+  if (m.variable) return "VRB";
+  if (m.wind_dir == null) return "calm";
+  return String(m.wind_dir).padStart(3, "0") + "°";
+}
+function windIcon(m) {
+  const spd = m.wind_speed_kt, hasDir = m.wind_dir != null && !m.variable;
+  const fav = (m.runways || []).find((r) => r.favored);
+  const arrow = hasDir
+    ? `<span class="wind-arr" style="transform:rotate(${m.wind_dir + 180}deg)">↑</span>`  // points downwind
+    : `<span class="wind-arr">·</span>`;
+  const lbl = `${_wDir(m)}${spd != null ? " " + spd + "kt" : ""}${m.gust_kt ? "G" + m.gust_kt : ""}`
+    + (fav ? " · RWY " + esc(fav.id) : "");
+  return L.divIcon({ className: "wind-icon", iconSize: [110, 46], iconAnchor: [55, 23],
+    html: `<span class="wind-arr-wrap">${arrow}</span><span class="wind-txt">${lbl}</span>` });
+}
+function metarPopup(m) {
+  const rows = (m.runways || []).map((r) => {
+    const comp = r.tailwind ? `<b class="tw">${Math.abs(r.headwind)} kt tailwind</b>`
+                            : `${r.headwind} kt head`;
+    const cross = r.crosswind ? ` · ${r.crosswind} kt cross (${r.cross_from})` : "";
+    return `<tr><td>${esc(r.id)}${r.favored ? " ★" : ""}</td><td>${comp}${cross}</td></tr>`;
+  }).join("");
+  return `<div class="popup metar-popup"><b>${esc(m.icao || "METAR")}</b>`
+    + `<div class="metar-raw">${esc(m.raw || "")}</div>`
+    + `<div class="metar-wind">Wind: ${_wDir(m)}`
+    + `${m.wind_speed_kt != null ? " at " + m.wind_speed_kt + " kt" : ""}${m.gust_kt ? " gust " + m.gust_kt : ""}</div>`
+    + (rows ? `<table class="metar-rwy">${rows}</table>` : "")
+    + (rows ? `<div class="muted" style="margin-top:4px">★ wind-favoured runway</div>` : "")
+    + `</div>`;
+}
+function drawMetar() {
+  metarLayer.clearLayers();
+  const m = _metarData, ap = _airportLL;
+  if (!m || !ap || ap.lat == null || (m.wind_dir == null && !m.raw)) return;
+  L.marker([ap.lat, ap.lon], { icon: windIcon(m), zIndexOffset: 700 })
+    .bindPopup(metarPopup(m)).addTo(metarLayer);
+}
+async function refreshMetar() {
+  if (!map.hasLayer(metarLayer)) return;
+  try {
+    const r = await fetch("api/metar", { cache: "no-store" });
+    const d = r.ok ? await r.json() : null;
+    _metarData = (d && (d.raw || d.wind_dir != null)) ? d : null;
+  } catch (e) { /* keep last-known */ }
+  drawMetar();
+}
+map.on("overlayadd", (e) => { if (e.layer === metarLayer) refreshMetar(); });
+map.on("overlayremove", (e) => { if (e.layer === metarLayer) metarLayer.clearLayers(); });
+setInterval(refreshMetar, 5 * 60 * 1000);   // METARs update ~hourly; refresh every 5 min while shown
+
 /* ---------- /api/aircraft polling ---------- */
 async function pollAircraft() {
   try {
@@ -325,6 +382,8 @@ function drawRunways(ap, runway) {
 function renderAircraft(data) {
   const rx = data.receiver;
   drawSites(rx, data.airport);
+  if (data.airport && data.airport.lat != null) _airportLL = data.airport;
+  if (map.hasLayer(metarLayer) && _metarData && !metarLayer.getLayers().length) drawMetar();
   drawSector(rx, data.watch);
   drawProximity(rx, data.proximity);
   drawRunways(data.airport, data.runway);
@@ -602,6 +661,15 @@ function fillForm(cfg) {
   mset("#mx-refresh", mx.refresh_hz); mset("#mx-gpio", mx.gpio_slowdown);
   mset("#mx-bits", mx.pwm_bits); mset("#mx-lsb", mx.pwm_lsb_ns); mset("#mx-dither", mx.pwm_dither_bits);
   mset("#mx-hw", mx.hardware);
+  // env-overridden fields are read-only in the UI (an env var forces the value)
+  const locked = new Set(cfg._env_locked || []);
+  ["lat", "lon", "home_airport", "airport_lat", "airport_lon", "airport_elev_ft", "route_api"].forEach((name) => {
+    const el = form.elements[name]; if (!el) return;
+    const on = locked.has(name);
+    el.disabled = on;
+    el.title = on ? "Forced by an environment variable — change that instead" : "";
+    const fld = el.closest(".field"); if (fld) fld.classList.toggle("env-locked", on);
+  });
 }
 
 async function loadConfig() {

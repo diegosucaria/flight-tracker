@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .airband import airband_status, apply_airband_config, test_beep, write_airband_conf, write_volume
-from . import navdata
+from . import navdata, metar
 from .airports import home_airport_coords, home_codes, resolve_airport
 from .config import Config
 from .enrich import aircraft_info, route_for_callsign
@@ -575,7 +575,16 @@ def _config_payload() -> dict:
     the two never drift (a POST that omitted ``runways`` would wipe the UI picker)."""
     data = cfg.to_dict()
     data["runways"] = [r["id"] for r in runways_for(cfg.home_airport)]
+    data["_env_locked"] = sorted(cfg.env_locked())   # fields forced by env vars → read-only in the UI
     return data
+
+
+@app.get("/api/metar")
+async def api_metar() -> JSONResponse:
+    """Home-airport METAR + per-runway head/cross-wind (for the weather map layer)."""
+    async with httpx.AsyncClient() as client:
+        data = await metar.get_metar(cfg.home_airport, runways_for(cfg.home_airport), client)
+    return JSONResponse(data or {})
 
 
 @app.get("/api/config")
