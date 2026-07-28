@@ -603,7 +603,10 @@ def _render_metar_idle(d, disp) -> None:
             d.text((2, 22), _scroll_str, font=small, fill=(150, 170, 195))
         else:
             gap = int(disp.get("scroll_gap_px", 12) or 12)
-            total = _scroll_w + gap
+            # Classic marquee, NOT the flight-stream chaining: wrap only after the tail has
+            # crossed the whole panel, so the repeat re-enters from the right edge (chaining
+            # `gap` px behind the tail made the message look like it restarted mid-screen).
+            total = _scroll_w + WIDTH + gap
             off = int(_scroll_x) % total
             d.text((WIDTH - off, 22), _scroll_str, font=small, fill=(150, 170, 195))
             d.text((WIDTH - off + total, 22), _scroll_str, font=small, fill=(150, 170, 195))
