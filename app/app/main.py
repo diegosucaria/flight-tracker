@@ -290,6 +290,29 @@ async def _enrich_featured(featured: dict, client: httpx.AsyncClient, airport: d
             # Re-classify now that origin/destination are known (route-based match).
             featured = classify(featured, cfg)
 
+    # --- Schedule override: the airport's own timetable beats the community route DB --
+    # adsbdb can return a stale-but-plausible pair for a reused callsign (one end matches
+    # where the plane is, the other city is simply wrong) — geometry can't reject that.
+    # Only meaningful near the home airport, where the flight can actually be on the
+    # schedule. Reuses the Flights-layer cache, so it adds no extra AeroDataBox calls.
+    dapt = featured.get("distance_to_airport_km")
+    if featured.get("flight") and isinstance(dapt, (int, float)) and dapt < 45.0:
+        sched = await flights.schedule_route_for(
+            cfg, featured["flight"].strip(), (route or {}).get("airline_iata"), client)
+        if sched:
+            if (sched["origin"], sched["destination"]) != \
+                    (featured.get("origin"), featured.get("destination")):
+                names = {featured.get("origin"): featured.get("origin_name"),
+                         featured.get("destination"): featured.get("destination_name")}
+                featured["origin"], featured["destination"] = sched["origin"], sched["destination"]
+                featured["origin_name"] = (names.get(sched["origin"])
+                                           or await _apt_name(sched["origin"], client))
+                featured["destination_name"] = (names.get(sched["destination"])
+                                                or await _apt_name(sched["destination"], client))
+                featured = classify(featured, cfg)   # re-classify on the corrected pair
+            featured.pop("route_unreliable", None)   # the timetable confirms/fixes the route
+            featured["route_source"] = "schedule"
+
     # --- Airframe backfill (adsbdb) ONLY for fields absent locally ---------------
     needs_backfill = not all(
         featured.get(k) for k in ("type", "type_desc", "registration", "operator"))
@@ -310,6 +333,14 @@ async def _enrich_featured(featured: dict, client: httpx.AsyncClient, airport: d
 
     featured["featured"] = True
     return featured
+
+
+async def _apt_name(code: str | None, client: httpx.AsyncClient) -> str | None:
+    """Display name for an airport code via the OurAirports cache (offline after first use)."""
+    if not code:
+        return None
+    rec = await resolve_airport(code, client)
+    return (rec or {}).get("name")
 
 
 def _departure_phase(ac: dict, elev: float) -> str | None:
@@ -665,7 +696,7 @@ async def api_flights() -> JSONResponse:
     """Recent (observed, ~3h) arrivals/departures at the home airport — OpenSky, not a schedule."""
     async with httpx.AsyncClient() as client:
         data = await flights.get_flights(cfg.home_airport, client)
-    return JSONResponse(data or {})
+    return JSONResponse(flights.for_display(data))
 
 
 @app.get("/api/airspace")

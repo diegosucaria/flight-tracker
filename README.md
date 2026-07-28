@@ -152,8 +152,13 @@ status), switch it to **AeroDataBox**:
    restarts and the layer switches to scheduled data (its header then reads *"scheduled"*).
 
 Usage is light: **one airport call per refresh** returns *every* arrival and departure at once
-(never one-per-aircraft), it's **cached ~30 min**, and it only fetches **while the layer is
-open** — so it stays well inside the free tier for normal use.
+(never one-per-aircraft) and it's **cached ~30 min**, so it stays well inside the free tier
+for normal use.
+
+The schedule also **corrects the featured flight's route**: community callsign→route data
+(adsbdb) can be stale when airlines reuse callsigns, so when the featured flight matches a
+scheduled arrival/departure at your airport, the timetable's city pair wins over the
+community answer.
 
 ### Airspace layer (optional)
 

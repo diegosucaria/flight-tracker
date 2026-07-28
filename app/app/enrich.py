@@ -62,6 +62,9 @@ async def route_for_callsign(callsign: str, client: httpx.AsyncClient) -> dict |
                 "origin_name": origin.get("municipality") or origin.get("name"),
                 "destination_name": dest.get("municipality") or dest.get("name"),
                 "airline": (fr.get("airline") or {}).get("name"),
+                # IATA code of the airline (e.g. "AR" for callsign prefix "ARG") — used to
+                # match the featured callsign against the airport schedule's flight numbers.
+                "airline_iata": (fr.get("airline") or {}).get("iata"),
                 # coords (may be None) → used for the duration estimate
                 "origin_lat": origin.get("latitude"),
                 "origin_lon": origin.get("longitude"),
