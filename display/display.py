@@ -551,19 +551,62 @@ def _fmt_wind(m: dict) -> str:
     return f"{ddd}/{int(spd):02d}{gust}kt"
 
 
+def _metar_extra_text(m: dict, fields) -> str:
+    """The scrolling extras line for the METAR face, per panel.metar_fields."""
+    f = fields or []
+    parts: list[str] = []
+    if "wx" in f and m.get("wx"):
+        parts.append(str(m["wx"]))                       # present weather: "TS RA", "BR"…
+    if "clouds" in f:
+        for c in (m.get("clouds") or [])[:4]:
+            cover, base = c.get("cover"), c.get("base_ft")
+            if not cover:
+                continue
+            if isinstance(base, (int, float)):           # METAR style: BKN035 (hundreds ft)
+                parts.append(f"{cover}{int(base) // 100:03d}")
+            else:
+                parts.append(str(cover))                 # CAVOK / CLR / NSC…
+    if "visib" in f and m.get("visib") is not None:
+        parts.append(f"VIS {m['visib']}")
+    if "dewp" in f and isinstance(m.get("dewp_c"), (int, float)):
+        parts.append(f"DP {round(m['dewp_c']):d}C")
+    return "  ".join(parts)
+
+
 def _render_metar_idle(d, disp) -> None:
-    """Idle weather face: wind / temperature / QNH from the app's cached home METAR."""
+    """Idle weather face: wind + temp/QNH, with a scrolling extras line (wx, clouds…)
+    at the bottom when panel.metar_fields selects any."""
+    global _scroll_str, _scroll_w, _scroll_key, _scroll_x
     m = disp.get("metar")
+    small = _font("small")
     if not isinstance(m, dict):
-        d.text((2, 12), "no wx data", font=_font("small"), fill=(150, 150, 165))
+        d.text((2, 12), "no wx data", font=small, fill=(150, 150, 165))
         return
     d.text((1, 0), _fmt_wind(m), font=_font("med"), fill=(120, 180, 255))
-    t = m.get("temp_c")
+    t, q = m.get("temp_c"), m.get("qnh_hpa")
     if isinstance(t, (int, float)):
-        d.text((2, 12), f"T {round(t):d}C", font=_font("small"), fill=(230, 230, 230))
-    q = m.get("qnh_hpa")
+        d.text((2, 11), f"T {round(t):d}C", font=small, fill=(230, 230, 230))
     if isinstance(q, (int, float)):
-        d.text((2, 22), f"Q {round(q):d}", font=_font("small"), fill=(235, 200, 80))
+        qt = f"Q {round(q):d}"
+        d.text((WIDTH - int(d.textlength(qt, font=small)) - 1, 11), qt,
+               font=small, fill=(235, 200, 80))
+    extra = _metar_extra_text(m, disp.get("metar_fields"))
+    key = ("__metar__", "idle")                    # reuse the marquee state machinery
+    if extra != _scroll_str or key != _scroll_key:
+        _scroll_str = extra
+        _scroll_w = int(d.textlength(extra, font=small)) if extra else 0
+        if key != _scroll_key:
+            _scroll_x = 0.0
+            _scroll_key = key
+    if _scroll_str and _scroll_w:
+        if _scroll_w <= WIDTH - 4:                 # short enough → just show it, no scroll
+            d.text((2, 22), _scroll_str, font=small, fill=(150, 170, 195))
+        else:
+            gap = int(disp.get("scroll_gap_px", 12) or 12)
+            total = _scroll_w + gap
+            off = int(_scroll_x) % total
+            d.text((WIDTH - off, 22), _scroll_str, font=small, fill=(150, 170, 195))
+            d.text((WIDTH - off + total, 22), _scroll_str, font=small, fill=(150, 170, 195))
 
 
 def _render_idle(d, disp, stale: bool = False) -> None:
@@ -647,6 +690,10 @@ async def render_loop() -> None:
         minute = time.strftime("%H:%M") if idle_face else None
         phase = (int(now / _METAR_ROTATE_S) % 2
                  if featured is None and beh == "clock_metar" else None)
+        # The METAR extras marquee needs per-pixel redraws while its text overflows the panel.
+        metar_face = featured is None and (beh == "metar" or (beh == "clock_metar" and phase == 1))
+        if metar_face and _scroll_key == ("__metar__", "idle") and _scroll_w > WIDTH - 4:
+            scrolling = True
         # animate flips only while the clock FACE is showing (in clock_metar's weather phase a
         # pending flip would otherwise force full-FPS redraws for the whole 8 s face)
         clock_anim = (bool(_clock_flips) and not featured

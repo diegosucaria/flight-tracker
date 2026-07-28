@@ -508,3 +508,5 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 22px; cu
 .stat-bar i { display: block; height: 100%; background: #38bdf8; border-radius: 4px; }
 .stat-n { width: 36px; flex: none; text-align: right; color: #7c8aa0;
   font-variant-numeric: tabular-nums; }
+.stats-phases { display: flex; gap: 10px; flex-wrap: wrap; font-size: 12px; }
+#stats-dates input[type="date"] { flex: 1; min-width: 0; }

@@ -70,7 +70,13 @@ async def get_metar(icao: str, runways: list[dict], client) -> dict | None:
                 "variable": not isinstance(wdir, (int, float)) and wdir is not None,
                 "wind_speed_kt": m.get("wspd") if isinstance(m.get("wspd"), (int, float)) else None,
                 "gust_kt": m.get("wgst") if isinstance(m.get("wgst"), (int, float)) else None,
-                "temp_c": m.get("temp"), "qnh_hpa": m.get("altim"),
+                "temp_c": m.get("temp"), "dewp_c": m.get("dewp"), "qnh_hpa": m.get("altim"),
+                # present weather (TS/RA/FG…), cloud layers, visibility — for the panel's
+                # scrolling METAR extras. visib is passed through as-is (can be "6+", SM).
+                "wx": m.get("wxString") or None,
+                "visib": m.get("visib"),
+                "clouds": [{"cover": c.get("cover"), "base_ft": c.get("base")}
+                           for c in (m.get("clouds") or []) if isinstance(c, dict)],
             })
         elif _cache["icao"] != icao:
             return None                      # no data and nothing cached for this field

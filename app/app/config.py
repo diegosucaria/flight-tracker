@@ -103,6 +103,9 @@ class PanelConfig:
     cycle_seconds: int = 0            # big/compact footer alternation; 0 = off
     idle_behavior: str = "message"    # blank | clock | metar | clock_metar | last | message
     idle_text: str = "no traffic"
+    # Extras scrolled on the METAR idle faces' bottom line: wx (present weather — TS/RA/FG…),
+    # clouds (layers + base), visib, dewp. Empty list = no scroll line.
+    metar_fields: list = field(default_factory=lambda: ["wx", "clouds"])
     route_extra: str = "auto"         # extra field by the route: auto|fl|alt|flalt|type|dist|speed|none
 
 
@@ -261,7 +264,7 @@ class Config:
     # Panel sub-fields (under the "panel" key).
     _PANEL_T = {"layout": str, "scroll_speed_px": float, "scroll_gap_px": int,
                 "scroll_fields": list, "cycle_seconds": float, "idle_behavior": str,
-                "idle_text": str, "route_extra": str}
+                "idle_text": str, "route_extra": str, "metar_fields": list}
     _PANEL_MERGEABLE = tuple(_PANEL_T)
     # Airband sub-fields (under the "airband" key); validated specially in _merge_airband.
     _AIRBAND_MERGEABLE = ("freqs", "gain")

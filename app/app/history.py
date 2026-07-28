@@ -192,11 +192,18 @@ class History:
             "ORDER BY ended_at DESC LIMIT ?", (max(1, min(200, limit)),))
         return [r["landing_runway"] for r in rows]
 
-    def stats(self, start_ts: int, end_ts: int) -> dict:
+    def stats(self, start_ts: int, end_ts: int, phases_in: list[str] | None = None) -> dict:
         """Aggregates for the web UI's Stats card. Hour/day bins use sqlite 'localtime'
-        (the container TZ), matching what the user experiences at the window."""
-        w = "WHERE started_at>=? AND started_at<=?"
-        p = (int(start_ts), int(end_ts))
+        (the container TZ), matching what the user experiences at the window.
+        ``phases_in`` filters every aggregate to those phases (NULL counts as overflight)."""
+        def _w(prefix: str = "") -> str:
+            s = f"WHERE {prefix}started_at>=? AND {prefix}started_at<=?"
+            if phases_in:
+                qs = ",".join("?" * len(phases_in))
+                s += f" AND COALESCE({prefix}phase,'overflight') IN ({qs})"
+            return s
+        p = (int(start_ts), int(end_ts), *(phases_in or ()))
+        w, wf = _w(), _w("f.")
         total = self._query(f"SELECT COUNT(*) n FROM flight {w}", p)
         phases = self._query(
             f"SELECT COALESCE(phase,'overflight') k, COUNT(*) n FROM flight {w} GROUP BY 1", p)
@@ -210,13 +217,13 @@ class History:
             f"SELECT landing_runway k, COUNT(*) n FROM flight {w} AND landing_runway IS NOT NULL "
             f"GROUP BY 1 ORDER BY n DESC", p)
         ops = self._query(
-            "SELECT COALESCE(NULLIF(TRIM(a.operator),''),'(unknown)') k, COUNT(*) n FROM flight f "
-            "LEFT JOIN aircraft a ON a.hex=f.hex WHERE f.started_at>=? AND f.started_at<=? "
-            "GROUP BY 1 ORDER BY n DESC LIMIT 8", p)
+            f"SELECT COALESCE(NULLIF(TRIM(a.operator),''),'(unknown)') k, COUNT(*) n FROM flight f "
+            f"LEFT JOIN aircraft a ON a.hex=f.hex {wf} "
+            f"GROUP BY 1 ORDER BY n DESC LIMIT 8", p)
         types = self._query(
-            "SELECT COALESCE(NULLIF(TRIM(a.type),''),'(unknown)') k, COUNT(*) n FROM flight f "
-            "LEFT JOIN aircraft a ON a.hex=f.hex WHERE f.started_at>=? AND f.started_at<=? "
-            "GROUP BY 1 ORDER BY n DESC LIMIT 8", p)
+            f"SELECT COALESCE(NULLIF(TRIM(a.type),''),'(unknown)') k, COUNT(*) n FROM flight f "
+            f"LEFT JOIN aircraft a ON a.hex=f.hex {wf} "
+            f"GROUP BY 1 ORDER BY n DESC LIMIT 8", p)
         by_hour = [0] * 24
         for r in hours:
             if isinstance(r.get("k"), int) and 0 <= r["k"] < 24:

@@ -840,6 +840,8 @@ function fillForm(cfg) {
   set("panel.route_extra", p.route_extra);
   const sf = p.scroll_fields || [];
   form.querySelectorAll('input[name="panel.scroll_fields"]').forEach((el) => { el.checked = sf.includes(el.value); });
+  const mf = p.metar_fields || [];
+  form.querySelectorAll('input[name="panel.metar_fields"]').forEach((el) => { el.checked = mf.includes(el.value); });
   // Visible-runways picker — checkboxes built from the airport's runways (cfg.runways).
   const vr = $("#visible-runways");
   if (vr && Array.isArray(cfg.runways)) {     // only rebuild when runways are present (never wipe)
@@ -933,6 +935,7 @@ function configBody() {
       idle_text: f["panel.idle_text"] ? f["panel.idle_text"].value : null,
       route_extra: f["panel.route_extra"] ? f["panel.route_extra"].value : null,
       scroll_fields: [...form.querySelectorAll('input[name="panel.scroll_fields"]:checked')].map((e) => e.value),
+      metar_fields: [...form.querySelectorAll('input[name="panel.metar_fields"]:checked')].map((e) => e.value),
     },
   };
   // visible runways (only if the picker has rendered, so we never wipe before load)
@@ -1381,7 +1384,7 @@ function renderStats(s) {
   if (!s || !s.total) { el.innerHTML = '<span class="muted">no flights recorded in this window</span>'; return; }
   const ph = s.phases || {};
   const secs = [];
-  secs.push(`<div class="stat-sec"><h4>${s.total.toLocaleString()} flights · ${s.days}d</h4>` +
+  secs.push(`<div class="stat-sec"><h4>${s.total.toLocaleString()} flights · ${esc(_statsLabel)}</h4>` +
     `<div class="stat-row muted">arrivals ${ph.arrival || 0} · departures ${ph.departure || 0} · overflights ${ph.overflight || 0}</div></div>`);
   const hm = Math.max(...s.by_hour, 1);
   const hourRows = s.by_hour.map((n, h) => ({ h: String(h).padStart(2, "0"), n }))
@@ -1406,14 +1409,44 @@ function renderStats(s) {
   }
   el.innerHTML = secs.join("");
 }
+let _statsLabel = "7d";
 async function refreshStats() {
-  const sel = $("#stats-range");
+  const mode = $("#stats-range") ? $("#stats-range").value : "7";
+  let url;
+  if (mode === "today") {
+    const d0 = new Date(); d0.setHours(0, 0, 0, 0);
+    url = `api/stats?start=${Math.floor(d0.getTime() / 1000)}&end=${Math.floor(Date.now() / 1000)}`;
+    _statsLabel = "today";
+  } else if (mode === "custom") {
+    const from = $("#stats-from").value, to = $("#stats-to").value;
+    if (!from || !to) return;                     // need both dates first
+    const s = Math.floor(new Date(from + "T00:00:00").getTime() / 1000);
+    const e = Math.floor(new Date(to + "T23:59:59").getTime() / 1000);
+    url = `api/stats?start=${s}&end=${e}`;
+    _statsLabel = `${from} → ${to}`;
+  } else {
+    url = "api/stats?days=" + mode;
+    _statsLabel = mode + "d";
+  }
+  const phv = [...$$(".stats-ph")].filter((c) => c.checked).map((c) => c.value);
+  if (!phv.length) {                              // nothing selected → say so, don't show stale data
+    $("#stats-body").innerHTML = '<span class="muted">select at least one flight kind</span>';
+    return;
+  }
+  if (phv.length < 3) url += "&phases=" + phv.join(",");
   try {
-    const r = await fetch("api/stats?days=" + (sel ? sel.value : 7), { cache: "no-store" });
+    const r = await fetch(url, { cache: "no-store" });
     if (r.ok) { renderStats(await r.json()); _statsLoaded = true; }
   } catch (e) { /* keep last-rendered */ }
 }
-if ($("#stats-range")) $("#stats-range").addEventListener("change", refreshStats);
+if ($("#stats-range")) $("#stats-range").addEventListener("change", () => {
+  if ($("#stats-dates")) $("#stats-dates").hidden = $("#stats-range").value !== "custom";
+  refreshStats();
+});
+["#stats-from", "#stats-to"].forEach((id) => {
+  if ($(id)) $(id).addEventListener("change", refreshStats);
+});
+$$(".stats-ph").forEach((c) => c.addEventListener("change", refreshStats));
 if ($("#stats-refresh")) $("#stats-refresh").addEventListener("click", refreshStats);
 if ($("#stats-card")) $("#stats-card").querySelector("h2").addEventListener("click", () =>
   setTimeout(() => {   // after the generic toggle ran: load on first expand

@@ -477,7 +477,9 @@ async def tick(client: httpx.AsyncClient) -> None:
             if m:                       # keep the last good compact METAR on a fetch miss
                 _panel_metar = {"wind_dir": m.get("wind_dir"), "wind_speed_kt": m.get("wind_speed_kt"),
                                 "gust_kt": m.get("gust_kt"), "variable": m.get("variable"),
-                                "temp_c": m.get("temp_c"), "qnh_hpa": m.get("qnh_hpa")}
+                                "temp_c": m.get("temp_c"), "dewp_c": m.get("dewp_c"),
+                                "qnh_hpa": m.get("qnh_hpa"), "wx": m.get("wx"),
+                                "visib": m.get("visib"), "clouds": m.get("clouds")}
         except Exception:  # noqa: BLE001 — panel weather must never break the tick
             pass
 
@@ -563,6 +565,7 @@ def _display_state(force_clock: bool = False) -> dict:
         "idle_behavior": "clock" if force_clock else p.idle_behavior,
         "idle_text": p.idle_text,
         "route_extra": p.route_extra,
+        "metar_fields": p.metar_fields,
     }
 
 
@@ -761,13 +764,24 @@ async def api_flights() -> JSONResponse:
 
 
 @app.get("/api/stats")
-async def api_stats(days: int = 7) -> JSONResponse:
+async def api_stats(days: int = 7, start: int | None = None, end: int | None = None,
+                    phases: str | None = None) -> JSONResponse:
     """Aggregated flight-history stats: busiest hours, per-day counts, runway split,
-    top operators/types. Windows of 1-90 days; local time (container TZ)."""
-    days = max(1, min(90, int(days)))
-    end = int(time.time())
-    data = await asyncio.to_thread(history.stats, end - days * 86400, end)
-    data["days"] = days
+    top operators/types. Window: ``days`` back from now, OR explicit ``start``/``end``
+    unix seconds (custom range, like /api/coverage). ``phases`` filters to a comma
+    list of arrival,departure,overflight. Local time (container TZ)."""
+    if start is not None or end is not None:           # a lone bound gets a sensible other end
+        e = int(end) if end is not None else int(time.time())
+        s = int(start) if start is not None else e - 7 * 86400
+        if e <= s:
+            s, e = e, s
+        s = max(s, e - 90 * 86400)                     # cap the window at 90 days
+    else:
+        e = int(time.time())
+        s = e - max(1, min(90, int(days))) * 86400
+    ph = [p for p in (phases or "").split(",") if p in ("arrival", "departure", "overflight")]
+    data = await asyncio.to_thread(history.stats, s, e, ph or None)
+    data["days"] = round((e - s) / 86400, 2)
     return JSONResponse(data)
 
 

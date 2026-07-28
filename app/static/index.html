@@ -291,6 +291,15 @@
                 <input type="text" name="panel.idle_text" maxlength="13" />
               </div>
             </div>
+            <div class="field">
+              <span class="field-label">METAR extras <small>(scrolling line on the METAR idle face)</small></span>
+              <div class="chk-grid">
+                <label class="chk"><input type="checkbox" name="panel.metar_fields" value="wx" /><span>Weather <small>(TS/RA/FG)</small></span></label>
+                <label class="chk"><input type="checkbox" name="panel.metar_fields" value="clouds" /><span>Clouds</span></label>
+                <label class="chk"><input type="checkbox" name="panel.metar_fields" value="visib" /><span>Visibility</span></label>
+                <label class="chk"><input type="checkbox" name="panel.metar_fields" value="dewp" /><span>Dewpoint</span></label>
+              </div>
+            </div>
             <div class="form-row two">
               <label class="chk"><input type="checkbox" name="quiet_enabled" /><span>Quiet hours <small>(dim the panel nightly)</small></span></label>
               <div class="field">
@@ -399,11 +408,22 @@
         <div class="body">
           <div class="hist-controls">
             <select id="stats-range">
-              <option value="7">last 7 days</option>
+              <option value="today">today</option>
+              <option value="7" selected>last 7 days</option>
               <option value="30">last 30 days</option>
               <option value="90">last 90 days</option>
+              <option value="custom">custom&hellip;</option>
             </select>
             <button type="button" id="stats-refresh" class="ghost" title="refresh">&#8635;</button>
+          </div>
+          <div class="hist-controls" id="stats-dates" hidden>
+            <input type="date" id="stats-from" title="from" />
+            <input type="date" id="stats-to" title="to" />
+          </div>
+          <div class="hist-controls stats-phases">
+            <label class="chk"><input type="checkbox" class="stats-ph" value="arrival" checked /><span>arrivals</span></label>
+            <label class="chk"><input type="checkbox" class="stats-ph" value="departure" checked /><span>departures</span></label>
+            <label class="chk"><input type="checkbox" class="stats-ph" value="overflight" checked /><span>overflights</span></label>
           </div>
           <div id="stats-body" class="stats-body"><span class="muted">open to load&hellip;</span></div>
         </div>
