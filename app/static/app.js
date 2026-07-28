@@ -1019,7 +1019,7 @@ function renderFreqRow(mhz = "", label = "", enabled = true) {
   row.className = "freq-row" + (enabled ? "" : " disabled");
   row.innerHTML =
     `<input type="checkbox" class="f-en" title="scan this frequency"${enabled ? " checked" : ""} />`
-    + `<input type="number" class="f-mhz" min="108" max="137" step="0.001" value="${esc(mhz)}" placeholder="118.300" />`
+    + `<input type="number" class="f-mhz" min="108" max="137" step="0.001" value="${esc(mhz)}" placeholder="118.000" />`
     + `<input type="text" class="f-label" maxlength="8" value="${esc(label)}" placeholder="TWR" />`
     + `<button type="button" class="f-del ghost" title="remove">×</button>`;
   freqRows.appendChild(row);

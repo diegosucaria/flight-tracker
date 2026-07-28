@@ -88,7 +88,7 @@ services:
       # remain only as documentation of the seed defaults. To roll back to env-driven
       # config, drop RTLSDRAIRBAND_CUSTOMCONFIG + the airband_config volume mount.
       - RTLSDRAIRBAND_CUSTOMCONFIG=true
-      - RTLSDRAIRBAND_FREQS=118.300,119.100,121.750   # example tower/approach/ground (AM) — set yours
+      - RTLSDRAIRBAND_FREQS=118.000,119.000,121.000   # example tower/approach/ground (AM) — set yours
       - RTLSDRAIRBAND_MODE=scan
       - RTLSDRAIRBAND_GAIN=33
       - RTLSDRAIRBAND_MOUNTPOINT=atc.mp3

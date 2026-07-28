@@ -51,7 +51,7 @@ async def airband_status(client: httpx.AsyncClient) -> dict:
     Shape::
 
         {"enabled": True, "online": True, "mount": "atc.mp3",
-         "port": 8000, "title": "119.100", "listeners": 0}
+         "port": 8000, "title": "119.000", "listeners": 0}
 
     ``online`` is False (with ``enabled`` still True) when the airband container is
     deploying, the RTL-SDR is unplugged, or Icecast has no source yet. The UI hides

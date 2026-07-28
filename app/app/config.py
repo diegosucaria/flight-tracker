@@ -129,9 +129,9 @@ class AirbandConfig:
     # Each freq has an ``enabled`` flag: disabled freqs are KEPT (so you can toggle them on
     # later) but excluded from the active rtl_airband scan.
     freqs: list = field(default_factory=lambda: [
-        {"mhz": 118.300, "label": "TWR", "enabled": True},
-        {"mhz": 119.100, "label": "APP", "enabled": True},
-        {"mhz": 121.750, "label": "GND", "enabled": True},
+        {"mhz": 118.000, "label": "TWR", "enabled": True},
+        {"mhz": 119.000, "label": "APP", "enabled": True},
+        {"mhz": 121.000, "label": "GND", "enabled": True},
     ])
     gain: float = 33.0
     squelch_snr: float = 9.0           # dB above noise floor (≈ rtl_airband's prior auto default); 0 = auto/off
