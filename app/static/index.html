@@ -4,8 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <title>flight-tracker</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <!-- Leaflet is vendored (app/static/vendor) so the UI works with no internet — this is
+       a LAN appliance; a CDN outage used to take the whole map down. -->
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -279,6 +280,8 @@
                 <select name="panel.idle_behavior">
                   <option value="message">Message</option>
                   <option value="clock">Clock</option>
+                  <option value="metar">METAR</option>
+                  <option value="clock_metar">Clock + METAR</option>
                   <option value="last">Last flight</option>
                   <option value="blank">Blank</option>
                 </select>
@@ -286,6 +289,23 @@
               <div class="field">
                 <span class="field-label">Idle text</span>
                 <input type="text" name="panel.idle_text" maxlength="13" />
+              </div>
+            </div>
+            <div class="form-row two">
+              <label class="chk"><input type="checkbox" name="quiet_enabled" /><span>Quiet hours <small>(dim the panel nightly)</small></span></label>
+              <div class="field">
+                <span class="field-label">Night brightness <small>(0 = off)</small></span>
+                <input type="number" name="quiet_brightness" min="0" max="100" step="5" />
+              </div>
+            </div>
+            <div class="form-row two">
+              <div class="field">
+                <span class="field-label">Quiet from</span>
+                <input type="time" name="quiet_start" />
+              </div>
+              <div class="field">
+                <span class="field-label">Quiet until</span>
+                <input type="time" name="quiet_end" />
               </div>
             </div>
             <div class="form-row two">
@@ -373,11 +393,25 @@
           <div id="hist-detail" class="hist-detail" hidden></div>
         </div>
       </section>
+
+      <section class="card collapsed" id="stats-card">
+        <h2 data-toggle>Stats <span class="chev">&#9662;</span></h2>
+        <div class="body">
+          <div class="hist-controls">
+            <select id="stats-range">
+              <option value="7">last 7 days</option>
+              <option value="30">last 30 days</option>
+              <option value="90">last 90 days</option>
+            </select>
+            <button type="button" id="stats-refresh" class="ghost" title="refresh">&#8635;</button>
+          </div>
+          <div id="stats-body" class="stats-body"><span class="muted">open to load&hellip;</span></div>
+        </div>
+      </section>
     </aside>
   </div>
 
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="vendor/leaflet/leaflet.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

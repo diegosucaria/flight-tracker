@@ -15,11 +15,36 @@ does not, so we backfill from adsbdb).
 """
 from __future__ import annotations
 
+import time
+
 import httpx
 
-_ROUTE_CACHE: dict[str, dict | None] = {}
-_AIRCRAFT_CACHE: dict[str, dict | None] = {}
+# Cache values are (result, retry_after) — retry_after None means the answer is CONFIRMED
+# (a 200, or a 404 = "no route/airframe known") and cached forever. A transient failure
+# (network error, 5xx, 429) caches None with a retry timestamp instead: without that, a
+# 2-minute adsbdb outage used to permanently blank routes for every callsign seen during it.
+_ROUTE_CACHE: dict[str, tuple[dict | None, float | None]] = {}
+_AIRCRAFT_CACHE: dict[str, tuple[dict | None, float | None]] = {}
+_MISS_RETRY_S = 600.0      # failed lookups become retryable after 10 min
+_CACHE_MAX = 4000          # 24/7 device: clear rather than grow forever (repopulates cheaply)
 ADSBDB = "https://api.adsbdb.com/v0"
+
+
+def _cache_get(cache: dict, key: str):
+    """(hit, value) — a failure entry counts as a hit only until its retry time."""
+    entry = cache.get(key)
+    if entry is None:
+        return False, None
+    value, retry_after = entry
+    if retry_after is not None and time.monotonic() >= retry_after:
+        return False, None
+    return True, value
+
+
+def _cache_put(cache: dict, key: str, value, confirmed: bool) -> None:
+    if len(cache) >= _CACHE_MAX:
+        cache.clear()
+    cache[key] = (value, None if confirmed else time.monotonic() + _MISS_RETRY_S)
 
 
 def _airport_code(node: dict) -> str | None:
@@ -45,10 +70,12 @@ async def route_for_callsign(callsign: str, client: httpx.AsyncClient) -> dict |
     cs = (callsign or "").strip().upper()
     if not cs:
         return None
-    if cs in _ROUTE_CACHE:
-        return _ROUTE_CACHE[cs]
+    hit, cached = _cache_get(_ROUTE_CACHE, cs)
+    if hit:
+        return cached
 
     out: dict | None = None
+    confirmed = False
     try:
         r = await client.get(f"{ADSBDB}/callsign/{cs}", timeout=5)
         if r.status_code == 200:
@@ -71,10 +98,13 @@ async def route_for_callsign(callsign: str, client: httpx.AsyncClient) -> dict |
                 "dest_lat": dest.get("latitude"),
                 "dest_lon": dest.get("longitude"),
             }
+            confirmed = True
+        elif r.status_code == 404:
+            confirmed = True             # adsbdb's answer IS "no route known" — cache it
     except (httpx.HTTPError, KeyError, ValueError):
-        out = None
+        pass                             # transient / malformed → short-lived miss, retried
 
-    _ROUTE_CACHE[cs] = out
+    _cache_put(_ROUTE_CACHE, cs, out, confirmed)
     return out
 
 
@@ -94,10 +124,12 @@ async def aircraft_info(hex_id: str, client: httpx.AsyncClient) -> dict | None:
     hx = (hex_id or "").strip().lower()
     if not hx:
         return None
-    if hx in _AIRCRAFT_CACHE:
-        return _AIRCRAFT_CACHE[hx]
+    hit, cached = _cache_get(_AIRCRAFT_CACHE, hx)
+    if hit:
+        return cached
 
     out: dict | None = None
+    confirmed = False
     try:
         r = await client.get(f"{ADSBDB}/aircraft/{hx}", timeout=5)
         if r.status_code == 200:
@@ -109,8 +141,11 @@ async def aircraft_info(hex_id: str, client: httpx.AsyncClient) -> dict | None:
                 "operator": a.get("registered_owner"),
                 "military": False,   # adsbdb provides no mil flag
             }
+            confirmed = True
+        elif r.status_code == 404:
+            confirmed = True             # confirmed unknown airframe
     except (httpx.HTTPError, KeyError, ValueError):
-        out = None
+        pass                             # transient / malformed → short-lived miss, retried
 
-    _AIRCRAFT_CACHE[hx] = out
+    _cache_put(_AIRCRAFT_CACHE, hx, out, confirmed)
     return out

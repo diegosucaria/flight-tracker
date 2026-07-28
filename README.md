@@ -38,14 +38,19 @@ small web UI.
 - **Runway awareness** — infers the active landing runway from ADS-B tracks and tells you whether
   an arrival passes your window or lands on the far side. Runway geometry is resolved at runtime
   for your airport (no hardcoded tables).
-- **Live map web UI** — Leaflet map with aircraft, trails, your watch sector, runways + extended
-  centerlines, a **Weather (METAR)** layer showing airport wind + the head/cross-wind on each
-  runway (which one the wind favours), a **Flights (recent)** layer with the last few hours'
-  observed arrivals/departures, and toggleable **Airways / Navaids / Fixes** overlays.
-- **Flight history** — every observed flight saved to SQLite; browse, filter, and replay tracks.
+- **Live map web UI** — Leaflet map (vendored — works with no internet) with aircraft, trails,
+  your watch sector, runways + extended centerlines, a **Weather (METAR)** layer showing airport
+  wind + the head/cross-wind on each runway (which one the wind favours), a **Flights (recent)**
+  layer with the last few hours' observed arrivals/departures, an **ADS-B coverage** layer (max
+  reception range per bearing from your history, with presets + custom date ranges — compare
+  antenna placements), and toggleable **Airways / Navaids / Fixes** overlays.
+- **Flight history** — every observed flight saved to SQLite; browse, filter, and replay tracks,
+  plus a **Stats** card (busiest hours, per-day counts, runway split, top operators/types).
 - **Tower-comms audio** *(optional)* — a 2nd SDR runs `rtl_airband` over your airport's VHF
   frequencies and plays it to a USB speaker.
-- **LED panel** — a 64×32 HUB75 panel with several layouts, tunable live from the UI.
+- **LED panel** — a 64×32 HUB75 panel with several layouts, tunable live from the UI. Idle faces
+  include a flip clock, a **METAR weather face** (wind/temp/QNH), or both alternating; **quiet
+  hours** dim (or switch off) the panel on a nightly schedule.
 
 ## How it works
 

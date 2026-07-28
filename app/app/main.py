@@ -463,6 +463,24 @@ async def tick(client: httpx.AsyncClient) -> None:
     diag["gps"] = gps.status()
     diag["active_runway"] = active_runway_id
 
+    # --- Panel idle METAR (only when one of the weather idle faces is selected) ----
+    # Throttled to once a minute and bounded to 6 s: get_metar's cache stamps only on
+    # SUCCESS, so during an internet outage (or at a METAR-less airport) an unthrottled
+    # call would re-attempt EVERY 1 s tick and block the poll loop for its full timeout.
+    global _panel_metar, _panel_metar_next
+    if cfg.panel.idle_behavior in ("metar", "clock_metar") \
+            and time.monotonic() >= _panel_metar_next:
+        _panel_metar_next = time.monotonic() + 60.0
+        try:
+            m = await asyncio.wait_for(
+                metar.get_metar(cfg.home_airport, runways_for(cfg.home_airport), client), 6.0)
+            if m:                       # keep the last good compact METAR on a fetch miss
+                _panel_metar = {"wind_dir": m.get("wind_dir"), "wind_speed_kt": m.get("wind_speed_kt"),
+                                "gust_kt": m.get("gust_kt"), "variable": m.get("variable"),
+                                "temp_c": m.get("temp_c"), "qnh_hpa": m.get("qnh_hpa")}
+        except Exception:  # noqa: BLE001 — panel weather must never break the tick
+            pass
+
     # --- Live web-map payload: pushed over /ws each tick (real-time, no poll lag) --
     latest_ws = {
         "featured": featured,
@@ -497,6 +515,24 @@ async def tick(client: httpx.AsyncClient) -> None:
     await broadcast(latest_ws)
 
 
+_panel_metar: dict | None = None    # compact METAR for the panel idle faces (refreshed in tick)
+_panel_metar_next: float = 0.0      # monotonic: earliest next fetch attempt (60 s throttle)
+
+
+def _in_quiet_hours(hm: str, start: str, end: str) -> bool:
+    """Is local time ``hm`` within [start, end)? An end before the start wraps overnight."""
+    def _mins(s):
+        try:
+            h, m = str(s).strip().split(":")
+            return int(h) * 60 + int(m)
+        except (ValueError, AttributeError):
+            return None
+    t, s, e = _mins(hm), _mins(start), _mins(end)
+    if None in (t, s, e) or s == e:
+        return False
+    return (s <= t < e) if s < e else (t >= s or t < e)
+
+
 def _display_state(force_clock: bool = False) -> dict:
     """LED-panel command block pushed to the display over /ws (applied live).
 
@@ -506,10 +542,18 @@ def _display_state(force_clock: bool = False) -> dict:
     change.
     """
     p = cfg.panel
+    bright = max(1, min(100, int(cfg.brightness)))
+    quiet = bool(cfg.quiet_enabled) and _in_quiet_hours(
+        time.strftime("%H:%M"), cfg.quiet_start, cfg.quiet_end)
+    if quiet:
+        bright = max(0, min(100, int(cfg.quiet_brightness)))   # 0 = panel off (blank frames)
     return {
-        "brightness": max(1, min(100, int(cfg.brightness))),
+        "brightness": bright,
+        "quiet": quiet,
         "auto": bool(cfg.auto_brightness),
         "flash": None,
+        # Compact METAR for the panel's idle weather faces (None unless one is selected).
+        "metar": _panel_metar if p.idle_behavior in ("metar", "clock_metar") else None,
         # LED layout + scroll prefs — the display reads these fresh each frame.
         "layout": p.layout,
         "scroll_speed_px": p.scroll_speed_px,
@@ -562,15 +606,32 @@ async def _resolve_home_airport(client: httpx.AsyncClient) -> None:
     await resolve_runways(cfg.home_airport, client)   # true headings → /config cache
 
 
+async def _ws_send(ws, payload: dict) -> bool:
+    try:
+        await asyncio.wait_for(ws.send_json(payload), timeout=1.0)
+        return True
+    except Exception:  # noqa: BLE001 — timeout, closed, transport error: drop this client
+        return False
+
+
 async def broadcast(payload: dict) -> None:
-    dead = []
-    for ws in list(clients):
-        try:
-            await ws.send_json(payload)
-        except Exception:  # noqa: BLE001
-            dead.append(ws)
-    for ws in dead:
-        clients.discard(ws)
+    """Push to every /ws client CONCURRENTLY with a per-send timeout.
+
+    A sequential, un-timed send let ONE stalled client (a phone that walked out of
+    WiFi: socket open, no ACKs, so the transport write buffer fills and the await
+    blocks until kernel TCP gives up — many minutes) freeze tick() and with it the
+    LED display, history ingest, and arrival detection. Now a dead client costs at
+    most 1 s, once, and is then dropped.
+    """
+    conns = list(clients)
+    if not conns:
+        return
+    oks = await asyncio.gather(*(_ws_send(ws, payload) for ws in conns))
+    for ws, ok in zip(conns, oks):
+        if not ok:
+            clients.discard(ws)
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(ws.close(), timeout=1.0)
 
 
 @asynccontextmanager
@@ -697,6 +758,17 @@ async def api_flights() -> JSONResponse:
     async with httpx.AsyncClient() as client:
         data = await flights.get_flights(cfg.home_airport, client)
     return JSONResponse(flights.for_display(data))
+
+
+@app.get("/api/stats")
+async def api_stats(days: int = 7) -> JSONResponse:
+    """Aggregated flight-history stats: busiest hours, per-day counts, runway split,
+    top operators/types. Windows of 1-90 days; local time (container TZ)."""
+    days = max(1, min(90, int(days)))
+    end = int(time.time())
+    data = await asyncio.to_thread(history.stats, end - days * 86400, end)
+    data["days"] = days
+    return JSONResponse(data)
 
 
 @app.get("/api/airspace")

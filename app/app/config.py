@@ -13,6 +13,42 @@ from dataclasses import asdict, dataclass, field, fields
 CONFIG_PATH = os.environ.get("CONFIG_PATH", "/config/config.json")
 
 
+_REJECT = object()   # sentinel: a merge value that failed coercion (dropped, never stored)
+
+
+def _coerce(value, typ):
+    """Coerce a JSON value to a merge field's type; ``_REJECT`` if it can't be.
+
+    Lenient where safe ("100" → 100.0) and strict where a wrong type would crash a
+    consumer (bools must be real bools; ``list`` means a list of strings).
+    """
+    if typ is bool:
+        return value if isinstance(value, bool) else _REJECT
+    if isinstance(value, bool):          # bools sneak through float()/int() — reject explicitly
+        return _REJECT
+    if typ is float:
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            return _REJECT
+        # json.loads accepts NaN/Infinity; a persisted NaN makes every JSONResponse of the
+        # config 500 (allow_nan=False) — the exact bricked-UI class this validation prevents.
+        return v if math.isfinite(v) else _REJECT
+    if typ is int:
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            return _REJECT
+        return int(v) if math.isfinite(v) else _REJECT
+    if typ is str:
+        return value if isinstance(value, str) else _REJECT
+    if typ is list:
+        if isinstance(value, list) and all(isinstance(x, str) for x in value):
+            return value
+        return _REJECT
+    return value
+
+
 def _env_float(*names: str, default: float = 0.0) -> float:
     """First parseable value among the given env var names, else default.
 
@@ -65,7 +101,7 @@ class PanelConfig:
     scroll_fields: list = field(default_factory=lambda: [
         "operator", "type", "registration", "fl", "speed", "vspeed", "dist", "eta"])
     cycle_seconds: int = 0            # big/compact footer alternation; 0 = off
-    idle_behavior: str = "message"    # blank | clock | last | message
+    idle_behavior: str = "message"    # blank | clock | metar | clock_metar | last | message
     idle_text: str = "no traffic"
     route_extra: str = "auto"         # extra field by the route: auto|fl|alt|flalt|type|dist|speed|none
 
@@ -189,6 +225,11 @@ class Config:
 
     # --- LED panel (pushed to the display over /ws, applied live) ------------------
     brightness: int = 60                  # 0-100; live-adjustable from the UI
+    # Quiet hours: dim (or blank, at 0) the LED panel on a nightly schedule (local time, TZ env).
+    quiet_enabled: bool = False
+    quiet_start: str = "23:00"            # HH:MM
+    quiet_end: str = "06:00"              # HH:MM (an end before the start wraps overnight)
+    quiet_brightness: int = 10            # 0-100 during quiet hours; 0 = panel off
     volume: int = 100                     # USB sound-card playback volume (0-100); applied by the speaker
     auto_brightness: bool = False         # future: dim by time-of-day / ambient sensor
     notify_flash: bool = False            # future: white flash when a plane enters the watch
@@ -197,19 +238,31 @@ class Config:
     matrix: MatrixConfig = field(default_factory=MatrixConfig)      # LED PWM/timing tuning
 
     # Top-level fields the API is allowed to set via POST /api/config.
-    _MERGEABLE = (
-        "lat", "lon", "use_gps", "traffic_mode", "distance_mode", "select_rule",
-        "route_api", "home_airport", "airport_lat", "airport_lon", "airport_elev_ft",
-        "brightness", "volume", "auto_brightness", "notify_flash", "visible_runways",
-        "hide_no_callsign", "hide_general_aviation", "trail_retain_s",
-    )
-    # Watch sub-fields the API is allowed to set (under the "watch" key).
+    # Mergeable fields WITH their required type — merge() coerces (e.g. "100" → 100.0) and
+    # DROPS values that don't fit, because one wrong-typed value here (a hand-written curl,
+    # a script bug) used to raise in tick() every second AND be persisted, bricking the
+    # display until a corrective POST — surviving reboots.
+    _MERGEABLE_T = {
+        "lat": float, "lon": float, "use_gps": bool, "traffic_mode": str,
+        "distance_mode": str, "select_rule": str, "route_api": str, "home_airport": str,
+        "airport_lat": float, "airport_lon": float, "airport_elev_ft": float,
+        "brightness": int, "volume": int, "auto_brightness": bool, "notify_flash": bool,
+        "visible_runways": list, "hide_no_callsign": bool, "hide_general_aviation": bool,
+        "trail_retain_s": int,
+        "quiet_enabled": bool, "quiet_start": str, "quiet_end": str, "quiet_brightness": int,
+    }
+    _MERGEABLE = tuple(_MERGEABLE_T)
+    # Watch sub-fields the API is allowed to set (under the "watch" key) — all floats.
     _WATCH_MERGEABLE = ("center_deg", "half_angle_deg", "min_km", "max_km")
     # Proximity sub-fields (under the "proximity" key).
-    _PROXIMITY_MERGEABLE = ("enabled", "center_deg", "half_angle_deg", "min_km", "max_km", "max_agl_ft")
+    _PROXIMITY_T = {"enabled": bool, "center_deg": float, "half_angle_deg": float,
+                    "min_km": float, "max_km": float, "max_agl_ft": float}
+    _PROXIMITY_MERGEABLE = tuple(_PROXIMITY_T)
     # Panel sub-fields (under the "panel" key).
-    _PANEL_MERGEABLE = ("layout", "scroll_speed_px", "scroll_gap_px", "scroll_fields",
-                        "cycle_seconds", "idle_behavior", "idle_text", "route_extra")
+    _PANEL_T = {"layout": str, "scroll_speed_px": float, "scroll_gap_px": int,
+                "scroll_fields": list, "cycle_seconds": float, "idle_behavior": str,
+                "idle_text": str, "route_extra": str}
+    _PANEL_MERGEABLE = tuple(_PANEL_T)
     # Airband sub-fields (under the "airband" key); validated specially in _merge_airband.
     _AIRBAND_MERGEABLE = ("freqs", "gain")
     # Matrix PWM/timing sub-fields (under "matrix"); clamped in _merge_matrix.
@@ -295,7 +348,9 @@ class Config:
         prev_airport = (self.home_airport or "").strip().upper()
         for key in self._MERGEABLE:
             if key in partial and key not in locked:
-                setattr(self, key, partial[key])
+                v = _coerce(partial[key], self._MERGEABLE_T[key])
+                if v is not _REJECT:
+                    setattr(self, key, v)
         # If the home airport changed, its resolved IATA (+ coords) are stale — clear so the
         # next startup re-resolves them from OurAirports.
         if (self.home_airport or "").strip().upper() != prev_airport:
@@ -304,17 +359,23 @@ class Config:
         if isinstance(watch, dict):
             for key in self._WATCH_MERGEABLE:
                 if key in watch:
-                    setattr(self.watch, key, watch[key])
+                    v = _coerce(watch[key], float)
+                    if v is not _REJECT:
+                        setattr(self.watch, key, v)
         proximity = partial.get("proximity")
         if isinstance(proximity, dict):
             for key in self._PROXIMITY_MERGEABLE:
                 if key in proximity:
-                    setattr(self.proximity, key, proximity[key])
+                    v = _coerce(proximity[key], self._PROXIMITY_T[key])
+                    if v is not _REJECT:
+                        setattr(self.proximity, key, v)
         panel = partial.get("panel")
         if isinstance(panel, dict):
             for key in self._PANEL_MERGEABLE:
                 if key in panel:
-                    setattr(self.panel, key, panel[key])
+                    v = _coerce(panel[key], self._PANEL_T[key])
+                    if v is not _REJECT:
+                        setattr(self.panel, key, v)
         airband = partial.get("airband")
         if isinstance(airband, dict):
             self._merge_airband(airband)
@@ -386,10 +447,15 @@ class Config:
         except ValueError as exc:
             print(f"[config] {path} unreadable ({exc}); using defaults")
             return cls().apply_env_overrides()
+        if not isinstance(data, dict):        # valid JSON but not an object ("x", 42, [...])
+            print(f"[config] {path} is not a JSON object; using defaults")
+            return cls().apply_env_overrides()
 
         def _only(dc, d):     # keep only fields the dataclass declares
+            if not isinstance(d, dict):    # a corrupted/hand-edited section (string, list, number)
+                return {}                  # → that section falls back to defaults, app still boots
             names = {f.name for f in fields(dc)}
-            return {k: v for k, v in (d or {}).items() if k in names}
+            return {k: v for k, v in d.items() if k in names}
 
         try:
             watch = WatchSector(**_only(WatchSector, data.pop("watch", {})))

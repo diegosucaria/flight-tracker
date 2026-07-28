@@ -215,6 +215,9 @@ def pick_featured(aircraft: list[dict], cfg, last_hex: str | None = None) -> dic
 
     if cfg.select_rule == "closest":
         key = lambda a: a["distance_km"]                       # noqa: E731
+    elif cfg.select_rule == "strongest":
+        # rssi is negative dBFS (closer to 0 = stronger); missing rssi sorts last.
+        key = lambda a: -(a["rssi"] if isinstance(a.get("rssi"), (int, float)) else -999.0)  # noqa: E731
     else:  # default: lowest_closest — lowest altitude, then nearest
         key = lambda a: (alt_ft(a), a["distance_km"])          # noqa: E731
 

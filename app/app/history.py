@@ -192,6 +192,43 @@ class History:
             "ORDER BY ended_at DESC LIMIT ?", (max(1, min(200, limit)),))
         return [r["landing_runway"] for r in rows]
 
+    def stats(self, start_ts: int, end_ts: int) -> dict:
+        """Aggregates for the web UI's Stats card. Hour/day bins use sqlite 'localtime'
+        (the container TZ), matching what the user experiences at the window."""
+        w = "WHERE started_at>=? AND started_at<=?"
+        p = (int(start_ts), int(end_ts))
+        total = self._query(f"SELECT COUNT(*) n FROM flight {w}", p)
+        phases = self._query(
+            f"SELECT COALESCE(phase,'overflight') k, COUNT(*) n FROM flight {w} GROUP BY 1", p)
+        hours = self._query(
+            f"SELECT CAST(strftime('%H', started_at, 'unixepoch', 'localtime') AS INTEGER) k, "
+            f"COUNT(*) n FROM flight {w} GROUP BY 1", p)
+        days = self._query(
+            f"SELECT strftime('%Y-%m-%d', started_at, 'unixepoch', 'localtime') k, COUNT(*) n "
+            f"FROM flight {w} GROUP BY 1 ORDER BY 1", p)
+        rwys = self._query(
+            f"SELECT landing_runway k, COUNT(*) n FROM flight {w} AND landing_runway IS NOT NULL "
+            f"GROUP BY 1 ORDER BY n DESC", p)
+        ops = self._query(
+            "SELECT COALESCE(NULLIF(TRIM(a.operator),''),'(unknown)') k, COUNT(*) n FROM flight f "
+            "LEFT JOIN aircraft a ON a.hex=f.hex WHERE f.started_at>=? AND f.started_at<=? "
+            "GROUP BY 1 ORDER BY n DESC LIMIT 8", p)
+        types = self._query(
+            "SELECT COALESCE(NULLIF(TRIM(a.type),''),'(unknown)') k, COUNT(*) n FROM flight f "
+            "LEFT JOIN aircraft a ON a.hex=f.hex WHERE f.started_at>=? AND f.started_at<=? "
+            "GROUP BY 1 ORDER BY n DESC LIMIT 8", p)
+        by_hour = [0] * 24
+        for r in hours:
+            if isinstance(r.get("k"), int) and 0 <= r["k"] < 24:
+                by_hour[r["k"]] = r["n"]
+        return {"total": total[0]["n"] if total else 0,
+                "phases": {r["k"]: r["n"] for r in phases},
+                "by_hour": by_hour,
+                "by_day": [{"day": r["k"], "n": r["n"]} for r in days],
+                "runways": [{"rwy": r["k"], "n": r["n"]} for r in rwys],
+                "operators": [{"name": r["k"], "n": r["n"]} for r in ops],
+                "types": [{"type": r["k"], "n": r["n"]} for r in types]}
+
     def flight_track(self, flight_id: int) -> list[dict]:
         return self._query(
             """SELECT ts,lat,lon,alt_baro,gs,track,baro_rate FROM position

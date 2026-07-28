@@ -27,7 +27,7 @@ const ft = (v) => {
 };
 const dur = (m) => {
   if (m == null) return null;
-  const h = Math.floor(m / 60), mm = Math.round(m % 60);
+  const t = Math.round(m), h = Math.floor(t / 60), mm = t % 60;   // round FIRST (else "1h 60m")
   return h ? `${h}h ${mm}m` : `${mm}m`;
 };
 function trend(rate) {
@@ -254,19 +254,33 @@ function _sectorShapes(layer, rx, g, ringColor, wedgeColor) {
 
 /* place receiver + airport markers */
 function drawSites(rx, ap) {
-  siteLayer.clearLayers();
+  // Persistent markers updated in place — recreating them every tick destroyed any open
+  // popup within ~1-2 s, making the receiver/airport popups unusable.
   if (rx) {
-    receiverMarker = L.marker([rx.lat, rx.lon], {
-      icon: siteIcon("📡", null), zIndexOffset: 1000,
-    }).bindPopup(`<div class="popup"><b>Receiver</b><br>${rx.lat.toFixed(4)}, ${rx.lon.toFixed(4)}</div>`);
-    siteLayer.addLayer(receiverMarker);
-  }
+    const html = `<div class="popup"><b>Receiver</b><br>${rx.lat.toFixed(4)}, ${rx.lon.toFixed(4)}</div>`;
+    if (receiverMarker) { receiverMarker.setLatLng([rx.lat, rx.lon]); receiverMarker.setPopupContent(html); }
+    else {
+      receiverMarker = L.marker([rx.lat, rx.lon], { icon: siteIcon("📡", null), zIndexOffset: 1000 })
+        .bindPopup(html);
+      siteLayer.addLayer(receiverMarker);
+    }
+  } else if (receiverMarker) { siteLayer.removeLayer(receiverMarker); receiverMarker = null; }
   if (ap && ap.lat != null && ap.lon != null) {
-    airportMarker = L.marker([ap.lat, ap.lon], {
-      icon: siteIcon("🛬", ap.code || "APT"), zIndexOffset: 900,
-    }).bindPopup(`<div class="popup"><b>${esc(ap.code || "Airport")}</b><br>${(+ap.lat).toFixed(4)}, ${(+ap.lon).toFixed(4)}</div>`);
-    siteLayer.addLayer(airportMarker);
-  }
+    const html = `<div class="popup"><b>${esc(ap.code || "Airport")}</b><br>${(+ap.lat).toFixed(4)}, ${(+ap.lon).toFixed(4)}</div>`;
+    if (airportMarker) {
+      airportMarker.setLatLng([ap.lat, ap.lon]);
+      airportMarker.setPopupContent(html);
+      if (airportMarker._apCode !== ap.code) {    // home airport changed → refresh the chip label
+        airportMarker.setIcon(siteIcon("🛬", ap.code || "APT"));
+        airportMarker._apCode = ap.code;
+      }
+    } else {
+      airportMarker = L.marker([ap.lat, ap.lon], { icon: siteIcon("🛬", ap.code || "APT"), zIndexOffset: 900 })
+        .bindPopup(html);
+      airportMarker._apCode = ap.code;
+      siteLayer.addLayer(airportMarker);
+    }
+  } else if (airportMarker) { siteLayer.removeLayer(airportMarker); airportMarker = null; }
 }
 
 /* ---------- weather layer: airport METAR + per-runway wind ---------- */
@@ -325,8 +339,10 @@ async function refreshMetar() {
   if (!map.hasLayer(metarLayer)) return;
   try {
     const r = await fetch("api/metar", { cache: "no-store" });
-    const d = r.ok ? await r.json() : null;
-    _metarData = (d && (d.raw || d.wind_dir != null)) ? d : null;
+    if (r.ok) {                       // a transient 5xx keeps the last-known box, like the catch
+      const d = await r.json();
+      _metarData = (d && (d.raw || d.wind_dir != null)) ? d : null;
+    }
   } catch (e) { /* keep last-known */ }
   drawMetar();
 }
@@ -369,8 +385,10 @@ async function refreshFlights() {
   if (!map.hasLayer(flightsLayer)) return;
   try {
     const r = await fetch("api/flights", { cache: "no-store" });
-    const d = r.ok ? await r.json() : null;
-    _flightsData = (d && d.icao) ? d : null;
+    if (r.ok) {                       // a transient 5xx keeps the last-known box, like the catch
+      const d = await r.json();
+      _flightsData = (d && d.icao) ? d : null;
+    }
   } catch (e) { /* keep last-known */ }
   drawFlights();
 }
@@ -442,19 +460,21 @@ async function refreshCoverage() {
   }
   try {
     const r = await fetch(url, { cache: "no-store" });
-    _coverageData = r.ok ? await r.json() : null;
+    if (r.ok) _coverageData = await r.json();   // transient errors keep the last-known envelope
   } catch (e) { /* keep last-known */ }
   drawCoverage();
 }
 map.on("overlayadd", (e) => { if (e.layer === coverageLayer) refreshCoverage(); });
 map.on("overlayremove", (e) => { if (e.layer === coverageLayer) { coverageLayer.clearLayers(); _covCtrl(null); } });
+setInterval(refreshCoverage, 10 * 60 * 1000);   // keep the envelope fresh while the layer is shown
 
 /* ---------- airspace layer: OpenAIP CTR / TMA / restricted around the airport ---------- */
 async function refreshAirspace() {
   if (!map.hasLayer(airspaceLayer)) return;
   try {
     const r = await fetch("api/airspace", { cache: "no-store" });
-    const d = r.ok ? await r.json() : null;
+    if (!r.ok) return;                    // keep the last-drawn polygons on a transient error
+    const d = await r.json();
     airspaceLayer.clearLayers();
     ((d && d.airspaces) || []).forEach((a) => {
       const col = a.restrictive ? "#f87171" : "#38bdf8";
@@ -541,6 +561,9 @@ function drawRunways(ap, runway) {
 }
 
 function renderAircraft(data) {
+  // Ignore the pre-first-tick seed frame (empty watch): drawing it wiped every marker and
+  // rendered a default 60 km sector that doesn't match the configured wedge.
+  if (!data || !data.watch || data.watch.max_km == null) return;
   const rx = data.receiver;
   drawSites(rx, data.airport);
   if (data.airport && data.airport.lat != null) _airportLL = data.airport;
@@ -801,6 +824,10 @@ function fillForm(cfg) {
   set("brightness", cfg.brightness);
   const bv = $("#bright-val"); if (bv && cfg.brightness != null) bv.textContent = cfg.brightness;
   const chk = (name, val) => { const el = form.elements[name]; if (el) el.checked = !!val; };
+  chk("quiet_enabled", cfg.quiet_enabled);
+  set("quiet_start", cfg.quiet_start);
+  set("quiet_end", cfg.quiet_end);
+  set("quiet_brightness", cfg.quiet_brightness);
   chk("hide_no_callsign", cfg.hide_no_callsign);
   chk("hide_general_aviation", cfg.hide_general_aviation);
   chk("proximity.enabled", px.enabled);
@@ -841,21 +868,27 @@ function fillForm(cfg) {
   if (mxCard) mxCard.style.display = cfg._show_panel_tuning ? "" : "none";
 }
 
+let cfgLoaded = false;   // gates auto-save: never POST a form that was never filled from the
+                         // device (it would silently reset the config to the HTML defaults)
 async function loadConfig() {
   try {
     const r = await fetch("api/config", { cache: "no-store" });
     if (!r.ok) throw new Error(r.status);
     fillForm(await r.json());
+    cfgLoaded = true;
   } catch (e) {
-    note("Config endpoint unavailable", "err");
+    note("Config endpoint unavailable — retrying…", "err");
+    setTimeout(loadConfig, 5000);
   }
 }
 
+let noteTimer = null;
 function note(msg, cls) {
   const el = $("#save-note");
+  clearTimeout(noteTimer);          // a stale ok-timer must not wipe a newer "Save failed"
   el.textContent = msg;
   el.className = "save-note " + (cls || "");
-  if (cls === "ok") setTimeout(() => { el.textContent = ""; el.className = "save-note"; }, 2500);
+  if (cls === "ok") noteTimer = setTimeout(() => { el.textContent = ""; el.className = "save-note"; }, 2500);
 }
 
 /* build the POST body from the current form state (nulls dropped) */
@@ -873,6 +906,10 @@ function configBody() {
     distance_mode: (form.querySelector('input[name="distance_mode"]:checked') || {}).value,
     trail_retain_s: numOrNull("trail_retain_s"),
     brightness: numOrNull("brightness"),
+    quiet_enabled: f["quiet_enabled"] ? f["quiet_enabled"].checked : null,
+    quiet_start: f["quiet_start"] ? (f["quiet_start"].value || null) : null,
+    quiet_end: f["quiet_end"] ? (f["quiet_end"].value || null) : null,
+    quiet_brightness: numOrNull("quiet_brightness"),
     hide_no_callsign: f["hide_no_callsign"] ? f["hide_no_callsign"].checked : null,
     hide_general_aviation: f["hide_general_aviation"] ? f["hide_general_aviation"].checked : null,
     watch: {
@@ -915,6 +952,7 @@ function configBody() {
 /* POST the current form. `silent` (auto-save) skips the button-disable + the form
    refill so it never fights the user's typing; the Save button passes silent=false. */
 async function saveConfig(silent) {
+  if (!cfgLoaded) { note("Config not loaded yet — edit blocked", "err"); return; }
   const sbtn = $("#save-btn");                 // may be absent (auto-save only)
   if (sbtn && !silent) sbtn.disabled = true;
   note("Saving…");
@@ -1329,6 +1367,58 @@ if ($("#hist-range")) $("#hist-range").addEventListener("change", histReset);
 if ($("#hist-refresh")) $("#hist-refresh").addEventListener("click", loadHistory);
 if ($("#hist-more")) $("#hist-more").addEventListener("click", () => { histShown += HIST_PAGE; renderHistList(); });
 loadHistory();
+
+/* ---------- stats card (aggregates from the flight history DB) ---------- */
+let _statsLoaded = false;
+function _statRows(pairs, labelKey, max) {
+  return pairs.map((r) =>
+    `<div class="stat-row"><span class="stat-label" title="${esc(String(r[labelKey]))}">${esc(String(r[labelKey]))}</span>` +
+    `<span class="stat-bar"><i style="width:${max ? Math.max(3, Math.round(r.n / max * 100)) : 0}%"></i></span>` +
+    `<span class="stat-n">${r.n}</span></div>`).join("");
+}
+function renderStats(s) {
+  const el = $("#stats-body");
+  if (!s || !s.total) { el.innerHTML = '<span class="muted">no flights recorded in this window</span>'; return; }
+  const ph = s.phases || {};
+  const secs = [];
+  secs.push(`<div class="stat-sec"><h4>${s.total.toLocaleString()} flights · ${s.days}d</h4>` +
+    `<div class="stat-row muted">arrivals ${ph.arrival || 0} · departures ${ph.departure || 0} · overflights ${ph.overflight || 0}</div></div>`);
+  const hm = Math.max(...s.by_hour, 1);
+  const hourRows = s.by_hour.map((n, h) => ({ h: String(h).padStart(2, "0"), n }))
+    .filter((r) => r.n > 0);
+  if (hourRows.length) secs.push(`<div class="stat-sec"><h4>Busiest hours</h4>${_statRows(hourRows, "h", hm)}</div>`);
+  const days = (s.by_day || []).slice(-14);
+  if (days.length > 1) {
+    const dm = Math.max(...days.map((d) => d.n), 1);
+    secs.push(`<div class="stat-sec"><h4>Per day</h4>${_statRows(days.map((d) => ({ d: d.day.slice(5), n: d.n })), "d", dm)}</div>`);
+  }
+  if ((s.runways || []).length) {
+    const rm = Math.max(...s.runways.map((r) => r.n), 1);
+    secs.push(`<div class="stat-sec"><h4>Landing runways</h4>${_statRows(s.runways.map((r) => ({ r: "RWY " + r.rwy, n: r.n })), "r", rm)}</div>`);
+  }
+  if ((s.operators || []).length) {
+    const om = Math.max(...s.operators.map((r) => r.n), 1);
+    secs.push(`<div class="stat-sec"><h4>Top operators</h4>${_statRows(s.operators.map((r) => ({ o: r.name, n: r.n })), "o", om)}</div>`);
+  }
+  if ((s.types || []).length) {
+    const tm = Math.max(...s.types.map((r) => r.n), 1);
+    secs.push(`<div class="stat-sec"><h4>Top types</h4>${_statRows(s.types.map((r) => ({ t: r.type, n: r.n })), "t", tm)}</div>`);
+  }
+  el.innerHTML = secs.join("");
+}
+async function refreshStats() {
+  const sel = $("#stats-range");
+  try {
+    const r = await fetch("api/stats?days=" + (sel ? sel.value : 7), { cache: "no-store" });
+    if (r.ok) { renderStats(await r.json()); _statsLoaded = true; }
+  } catch (e) { /* keep last-rendered */ }
+}
+if ($("#stats-range")) $("#stats-range").addEventListener("change", refreshStats);
+if ($("#stats-refresh")) $("#stats-refresh").addEventListener("click", refreshStats);
+if ($("#stats-card")) $("#stats-card").querySelector("h2").addEventListener("click", () =>
+  setTimeout(() => {   // after the generic toggle ran: load on first expand
+    if (!$("#stats-card").classList.contains("collapsed") && !_statsLoaded) refreshStats();
+  }, 0));
 
 /* ---------- collapsible cards ---------- */
 $$(".card > h2[data-toggle]").forEach((h) =>

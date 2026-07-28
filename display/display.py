@@ -53,25 +53,35 @@ def _mxget(key: str, env: str, default: str) -> int:
     return max(lo, min(hi, n)) if lo is not None else n
 
 
-ROWS = int(os.environ.get("MATRIX_ROWS", "32"))
-COLS = int(os.environ.get("MATRIX_COLS", "64"))
-CHAIN = int(os.environ.get("MATRIX_CHAIN", "1"))
+def _envnum(env: str, default: int, lo: int | None = None, hi: int | None = None) -> int:
+    """int(env var) that DEGRADES to the default on a typo ("60%", "180deg") — these parse at
+    import, and an exception here would crash-loop the container instead of showing anything."""
+    try:
+        n = int(float(os.environ.get(env, default)))
+    except (TypeError, ValueError):
+        n = int(default)
+    return max(lo, min(hi, n)) if lo is not None else n
+
+
+ROWS = _envnum("MATRIX_ROWS", 32)
+COLS = _envnum("MATRIX_COLS", 64)
+CHAIN = _envnum("MATRIX_CHAIN", 1)
 WIDTH, HEIGHT = COLS * CHAIN, ROWS
 APP_WS_URL = os.environ.get("APP_WS_URL", "ws://app:8080/ws")
 HARDWARE = (_MX.get("hardware") if _MX.get("hardware") in ("adafruit-hat", "adafruit-hat-pwm")
             else os.environ.get("MATRIX_HARDWARE", "adafruit-hat"))   # -pwm after the solder mod
 GPIO_SLOWDOWN = _mxget("gpio_slowdown", "MATRIX_GPIO_SLOWDOWN", "3")   # research-recommended default
-RP1_PIO = int(os.environ.get("MATRIX_RP1_PIO", "1"))   # 1 = PIO (/dev/pio0, flicker-immune), 0 = RIO
-BRIGHTNESS = max(5, min(100, int(float(os.environ.get("MATRIX_BRIGHTNESS", "60")))))
+RP1_PIO = _envnum("MATRIX_RP1_PIO", 1)   # 1 = PIO (/dev/pio0, flicker-immune), 0 = RIO
+BRIGHTNESS = _envnum("MATRIX_BRIGHTNESS", 60, 5, 100)
 # Panel mounting rotation in degrees (180 = upside-down mount; 0 = none).
-ROTATE = int(os.environ.get("MATRIX_ROTATE", "180"))
+ROTATE = _envnum("MATRIX_ROTATE", 180)
 PWM_BITS = _mxget("pwm_bits", "MATRIX_PWM_BITS", "9")    # 8 beats the row scan → keep 9
 # Research: cap refresh ~200 to avoid the scan beat (uncapped beat the row scan).
 REFRESH_HZ = _mxget("refresh_hz", "MATRIX_REFRESH_HZ", "200")
 PWM_DITHER = _mxget("pwm_dither_bits", "MATRIX_PWM_DITHER_BITS", "0")
 PWM_LSB_NS = _mxget("pwm_lsb_ns", "MATRIX_PWM_LSB_NS", "200")
 SHOW_REFRESH = os.environ.get("MATRIX_SHOW_REFRESH", "0") == "1"
-FPS = max(5, int(os.environ.get("MATRIX_FPS", "50")))   # render-loop tick rate (redraw only on px-change)
+FPS = _envnum("MATRIX_FPS", 50, 5, 240)   # render-loop tick rate (redraw only on px-change)
 
 # --- Bring up the real matrix; fall back to log-only on any failure ------------
 matrix = None
@@ -150,6 +160,15 @@ _last_scroll_pos = -1     # last integer scroll px drawn — redraw only when it
 _FLIP_DUR = 0.42          # seconds for one flip-clock digit to flip
 _clock_shown = None       # the 4 digits currently settled on the flip clock
 _clock_flips: dict = {}   # pos -> (old_char, start_monotonic) for in-progress flips
+# Data-staleness guard: with the app down (crash, deploy pull), the last featured flight
+# used to render FOREVER, looking live. After STALE_S of WS silence we fall back to idle.
+STALE_S = 30.0
+_last_msg_t = None        # monotonic time of the last WS message (None until the first)
+_drawn_stale = False      # staleness state of the LAST drawn frame (transition → redraw)
+_drawn_off = False        # panel_off state of the LAST drawn frame
+_drawn_minute = None      # HH:MM last drawn on an idle clock face (advances it with the app down)
+_drawn_phase = None       # last clock<->metar rotation phase drawn
+_METAR_ROTATE_S = 8.0     # clock_metar idle: seconds per face
 
 
 # ---------- small formatters ----------
@@ -520,9 +539,36 @@ def _render_flip_clock(d) -> None:
     _clock_shown = "".join(shown)
 
 
-def _render_idle(d, disp) -> None:
-    landing = STATE.get("landing")          # a recent touchdown flashes over the idle view
-    if landing:
+def _fmt_wind(m: dict) -> str:
+    """METAR wind as the familiar 'ddd/ffGggkt' (VRB for variable, CALM for none)."""
+    spd = m.get("wind_speed_kt")
+    if not isinstance(spd, (int, float)) or spd <= 0:
+        return "CALM"
+    wdir = m.get("wind_dir")
+    ddd = f"{int(wdir):03d}" if isinstance(wdir, (int, float)) else ("VRB" if m.get("variable") else "---")
+    g = m.get("gust_kt")
+    gust = f"G{int(g)}" if isinstance(g, (int, float)) and g > 0 else ""
+    return f"{ddd}/{int(spd):02d}{gust}kt"
+
+
+def _render_metar_idle(d, disp) -> None:
+    """Idle weather face: wind / temperature / QNH from the app's cached home METAR."""
+    m = disp.get("metar")
+    if not isinstance(m, dict):
+        d.text((2, 12), "no wx data", font=_font("small"), fill=(150, 150, 165))
+        return
+    d.text((1, 0), _fmt_wind(m), font=_font("med"), fill=(120, 180, 255))
+    t = m.get("temp_c")
+    if isinstance(t, (int, float)):
+        d.text((2, 12), f"T {round(t):d}C", font=_font("small"), fill=(230, 230, 230))
+    q = m.get("qnh_hpa")
+    if isinstance(q, (int, float)):
+        d.text((2, 22), f"Q {round(q):d}", font=_font("small"), fill=(235, 200, 80))
+
+
+def _render_idle(d, disp, stale: bool = False) -> None:
+    landing = None if stale else STATE.get("landing")   # touchdown flash (suppressed when stale
+    if landing:                                         # — its TTL is enforced app-side)
         cs = str(landing.get("callsign") or "")[:9]
         rwy = landing.get("runway")
         d.text((2, 1), cs, font=_font("med"), fill=(0, 230, 90))
@@ -534,7 +580,16 @@ def _render_idle(d, disp) -> None:
     if beh == "clock":
         _render_flip_clock(d)
         return
-    if beh == "last" and _last_featured:
+    if beh == "metar":
+        _render_metar_idle(d, disp)
+        return
+    if beh == "clock_metar":                # alternate faces every _METAR_ROTATE_S seconds
+        if int(time.monotonic() / _METAR_ROTATE_S) % 2 == 0:
+            _render_flip_clock(d)
+        else:
+            _render_metar_idle(d, disp)
+        return
+    if beh == "last" and _last_featured and not stale:
         render_hybrid(d, _last_featured, disp)
         return
     d.text((2, 12), (disp.get("idle_text") or "no traffic")[:12], font=_font("small"), fill=(150, 150, 165))
@@ -555,60 +610,122 @@ async def render_loop() -> None:
     when the whole-pixel position ticks; the high tick rate just lets each step land on time.
     """
     global _last_frame, _scroll_x, _drawn_ver, _last_scroll_pos
+    global _drawn_stale, _drawn_minute, _drawn_phase, _drawn_off
     frame_dt = 1.0 / FPS
     while True:
         now = time.monotonic()
         if _last_frame is None:
             _last_frame = now
         disp = STATE["display"] or {}
-        featured = STATE["featured"]
+        # Data-staleness: with the app silent > STALE_S (crash, deploy pull) the featured
+        # flight is long gone — render idle instead of a frozen flight that looks live.
+        stale = _last_msg_t is not None and (now - _last_msg_t) > STALE_S
+        featured = None if stale else STATE["featured"]
         layout = disp.get("layout") or "hybrid"
-        scrolling = (layout == "ticker"
-                     or (layout == "hybrid" and bool(disp.get("scroll_fields"))))
+        beh = disp.get("idle_behavior", "message")
+        # The "last" idle face renders the hybrid marquee too — it must keep per-pixel redraws
+        # or the last flight's scroll line jumps once a second instead of scrolling.
+        shows_flight = bool(featured) or (featured is None and beh == "last"
+                                          and _last_featured is not None and not stale)
+        scrolling = shows_flight and (layout == "ticker"
+                                      or (layout == "hybrid" and bool(disp.get("scroll_fields"))))
         # px/SECOND accumulator (frame-rate independent). Legacy saved values were px/frame
         # (slider 0.5-3); treat anything <=6 as legacy and scale by the old 25 fps.
-        spd = float(disp.get("scroll_speed_px", 30.0))
+        try:
+            spd = float(disp.get("scroll_speed_px", 30.0))
+        except (TypeError, ValueError):
+            spd = 30.0
         if spd <= 6.0:
             spd *= 25.0
         dt = min(now - _last_frame, 0.1)        # clamp stalls so we never jump a big gap
         _scroll_x += spd * dt
         _last_frame = now
         pos = int(_scroll_x)
-        # keep redrawing while a flip-clock digit is mid-animation
+        # Idle clock/weather faces advance on their own timers, NOT only on WS messages —
+        # otherwise the clock froze at the last-drawn minute whenever the app was down.
+        idle_face = featured is None and beh in ("clock", "metar", "clock_metar")
+        minute = time.strftime("%H:%M") if idle_face else None
+        phase = (int(now / _METAR_ROTATE_S) % 2
+                 if featured is None and beh == "clock_metar" else None)
+        # animate flips only while the clock FACE is showing (in clock_metar's weather phase a
+        # pending flip would otherwise force full-FPS redraws for the whole 8 s face)
         clock_anim = (bool(_clock_flips) and not featured
-                      and disp.get("idle_behavior") == "clock")
-        if matrix is not None and ((scrolling and pos != _last_scroll_pos)
-                                   or _ws_ver != _drawn_ver or clock_anim):
+                      and (beh == "clock" or (beh == "clock_metar" and phase == 0)))
+        b = disp.get("brightness")
+        panel_off = isinstance(b, (int, float)) and b <= 0     # quiet hours at 0 = blank panel
+        if panel_off:
+            # While off: push only on state transitions/data ticks — never on animation
+            # timers (a pending clock flip would otherwise push blank frames at full FPS
+            # all night; the flips complete instantly when quiet hours end).
+            need = panel_off != _drawn_off or _ws_ver != _drawn_ver
+        else:
+            need = (_ws_ver != _drawn_ver or clock_anim
+                    or (scrolling and pos != _last_scroll_pos)
+                    or panel_off != _drawn_off or stale != _drawn_stale
+                    or minute != _drawn_minute or phase != _drawn_phase)
+        if matrix is not None and need:
             img = Image.new("RGB", (WIDTH, HEIGHT), (0, 0, 0))
             d = ImageDraw.Draw(img)
-            if not featured:
-                _render_idle(d, disp)
-            else:
-                _LAYOUTS.get(layout, render_hybrid)(d, featured, disp)
-            _push(img)
+            if not panel_off:
+                # One bad field (a malformed test flight, an odd enrichment value) must never
+                # kill the process — balena would restart it into the same poisoned state,
+                # a deterministic crash loop. Fall back to the compact layout, else blank.
+                try:
+                    if not featured:
+                        _render_idle(d, disp, stale)
+                    else:
+                        _LAYOUTS.get(layout, render_hybrid)(d, featured, disp)
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[display] render error ({type(exc).__name__}: {exc}) — fallback")
+                    img = Image.new("RGB", (WIDTH, HEIGHT), (0, 0, 0))
+                    d = ImageDraw.Draw(img)
+                    if featured:
+                        try:
+                            render_compact(d, featured, disp)
+                        except Exception:  # noqa: BLE001 — blank frame beats a dead panel
+                            pass
+            try:
+                _push(img)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[display] push failed: {exc}")
             _drawn_ver = _ws_ver
             _last_scroll_pos = pos
+            _drawn_stale = stale
+            _drawn_off = panel_off
+            _drawn_minute = minute
+            _drawn_phase = phase
         await asyncio.sleep(max(0.0, frame_dt - (time.monotonic() - now)))
 
 
 async def ws_task() -> None:
     """Subscribe to the app's /ws; only STORE the latest state (no rendering here)."""
-    global STATE, _last_featured, _ws_ver
+    global STATE, _last_featured, _ws_ver, _last_msg_t
     async for ws in websockets.connect(APP_WS_URL):       # auto-reconnect
         try:
             async for msg in ws:
-                data = json.loads(msg)
-                feat = data.get("featured")
-                STATE = {"featured": feat, "display": data.get("display") or {},
-                         "landing": data.get("landing")}
-                _ws_ver += 1
-                if feat:
-                    _last_featured = feat
-                    print(f"[display] {feat.get('flight', '?')} "
-                          f"{feat.get('origin', '?')}>{feat.get('destination', '?')} "
-                          f"rwy={feat.get('landing_runway') or feat.get('departure_runway')} "
-                          f"vis={feat.get('window_visible')}")
-                _apply_display(data.get("display"))
+                # One malformed frame (anything on the LAN can connect to /ws) must skip,
+                # not kill the process — that restarted the whole container per frame.
+                try:
+                    data = json.loads(msg)
+                    if not isinstance(data, dict):
+                        continue
+                    feat = data.get("featured")
+                    feat = feat if isinstance(feat, dict) else None
+                    disp = data.get("display")
+                    STATE = {"featured": feat,
+                             "display": disp if isinstance(disp, dict) else {},
+                             "landing": data.get("landing")}
+                    _last_msg_t = time.monotonic()
+                    _ws_ver += 1
+                    if feat:
+                        _last_featured = feat
+                        print(f"[display] {feat.get('flight', '?')} "
+                              f"{feat.get('origin', '?')}>{feat.get('destination', '?')} "
+                              f"rwy={feat.get('landing_runway') or feat.get('departure_runway')} "
+                              f"vis={feat.get('window_visible')}")
+                    _apply_display(STATE["display"])
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[display] bad ws message ignored ({type(exc).__name__}: {exc})")
         except websockets.ConnectionClosed:
             continue
 

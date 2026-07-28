@@ -494,3 +494,17 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 22px; cu
 .nd-tip.fix { color: #9fb3c8; font-weight: 500; }
 .nd-tip.awy { color: #1a1a1a; background: rgba(231, 201, 110, .92);
   padding: 0 3px; border-radius: 2px; font-size: 10px; font-weight: 700; }
+
+/* ---------- stats card ---------- */
+.stats-body { display: flex; flex-direction: column; gap: 12px; }
+.stats-body .muted { color: #7c8aa0; font-size: 12px; }
+.stat-sec h4 { margin: 0 0 5px; font-size: 10px; text-transform: uppercase;
+  letter-spacing: .07em; color: #7c8aa0; font-weight: 600; }
+.stat-row { display: flex; align-items: center; gap: 6px; font-size: 12px; line-height: 1.6; }
+.stat-label { width: 62px; flex: none; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; color: #c7d0dd; }
+.stat-bar { flex: 1; height: 8px; background: rgba(124, 138, 160, .16); border-radius: 4px;
+  overflow: hidden; }
+.stat-bar i { display: block; height: 100%; background: #38bdf8; border-radius: 4px; }
+.stat-n { width: 36px; flex: none; text-align: right; color: #7c8aa0;
+  font-variant-numeric: tabular-nums; }
