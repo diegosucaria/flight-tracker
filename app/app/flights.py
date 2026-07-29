@@ -16,11 +16,16 @@ import re
 import time
 from datetime import datetime, timedelta
 
-_TTL_S = 1800.0          # refresh at most every 30 min — ONE airport call returns every
-                         #   arrival/departure, so this bounds AeroDataBox usage well inside
-                         #   the free tier (a 12 h schedule barely changes in 30 min)
+_TTL_S = 1800.0          # OpenSky (observed) cache TTL — free, keyless, freshness matters
+_TTL_SCHED_S = 3 * 3600.0  # AeroDataBox (scheduled) TTL — a 12 h timetable barely changes,
+                           #   and the featured route-override consults this cache 24/7 from
+                           #   tick(), so the cadence must stay inside the BASIC free tier's
+                           #   MONTHLY API units (30 min around the clock exhausted it)
 _ERR_RETRY_S = 300.0     # after a failed refresh: keep the last good data, retry in 5 min
                          #   (without this a stale cache + a down upstream = a fetch per poll tick)
+_QUOTA_PARK_S = 12 * 3600.0   # after a monthly-quota 429: stop asking AeroDataBox entirely
+_RATE_PARK_S = 600.0          # after a per-second/minute rate 429: brief pause
+_adb_block_until = 0.0        # monotonic deadline while AeroDataBox is parked
 _MAX = 8                  # rows shown per list (the CACHE keeps the full lists for route matching)
 _cache: dict = {"t": -1e12, "icao": None, "data": None, "good": False}
 
@@ -101,9 +106,12 @@ def _adb_clean(rows, kind: str) -> list[dict]:
 
 
 async def _aerodatabox(icao: str, client) -> dict | None:
+    global _adb_block_until
     key = os.environ.get(_ADB_KEY_ENV)
     if not key:
         return None                                  # no key -> caller falls back to OpenSky
+    if time.monotonic() < _adb_block_until:
+        return None                                  # parked (quota/rate 429) -> OpenSky
     now = datetime.now()
     frm = (now - timedelta(hours=_ADB_PAST_H)).strftime("%Y-%m-%dT%H:%M")
     to = (now + timedelta(hours=_ADB_AHEAD_H)).strftime("%Y-%m-%dT%H:%M")
@@ -113,6 +121,14 @@ async def _aerodatabox(icao: str, client) -> dict | None:
               "withCargo": "false", "withPrivate": "false", "withLocation": "false"}
     try:
         r = await client.get(url, headers=headers, params=params, timeout=25)
+        if r.status_code == 429:
+            # Distinguish "monthly API units gone" (park for hours — every further call is
+            # wasted) from a per-second rate blip (brief pause).
+            monthly = "MONTHLY" in r.text[:300].upper()
+            _adb_block_until = time.monotonic() + (_QUOTA_PARK_S if monthly else _RATE_PARK_S)
+            print(f"[flights] AeroDataBox 429 ({'monthly quota' if monthly else 'rate'}) — "
+                  f"parked {'12h' if monthly else '10min'}, using OpenSky")
+            return None
         r.raise_for_status()
         j = r.json()
     except Exception:
@@ -132,7 +148,7 @@ async def get_flights(icao: str, client) -> dict | None:
         return None
 
     now = time.monotonic()
-    if _cache["icao"] == icao and now - _cache["t"] < (_TTL_S if _cache["good"] else _ERR_RETRY_S):
+    if _cache["icao"] == icao and now - _cache["t"] < _cache_ttl():
         return _cache["data"]
 
     data = await _aerodatabox(icao, client)          # scheduled, if a key is configured
@@ -148,8 +164,16 @@ async def get_flights(icao: str, client) -> dict | None:
         _cache.update(t=now, icao=icao, data=data, good=ok)
     else:
         # Failed refresh but we still hold good rows for this airport: keep them, retry soon.
-        _cache["t"] = now - _TTL_S + _ERR_RETRY_S
+        _cache["t"] = now - _cache_ttl() + _ERR_RETRY_S
     return _cache["data"]
+
+
+def _cache_ttl() -> float:
+    """Freshness window for the current cache entry: scheduled data lives longer (API-unit
+    budget), observed data refreshes faster, failures retry soon."""
+    if not _cache["good"]:
+        return _ERR_RETRY_S
+    return _TTL_SCHED_S if (_cache["data"] or {}).get("scheduled") else _TTL_S
 
 
 def for_display(data: dict | None) -> dict:

@@ -157,8 +157,11 @@ status), switch it to **AeroDataBox**:
    restarts and the layer switches to scheduled data (its header then reads *"scheduled"*).
 
 Usage is light: **one airport call per refresh** returns *every* arrival and departure at once
-(never one-per-aircraft) and it's **cached ~30 min**, so it stays well inside the free tier
-for normal use.
+(never one-per-aircraft) and the schedule is **cached ~3 h** — the route-correction below
+consults it around the clock, so the cadence is tuned to stay inside the Basic plan's
+**monthly API-unit quota**. If the quota is ever exhausted anyway, the app parks AeroDataBox
+and falls back to OpenSky (the box header then reads *"observed (ADS-B), not a schedule"*)
+until the quota resets.
 
 The schedule also **corrects the featured flight's route**: community callsign→route data
 (adsbdb) can be stale when airlines reuse callsigns, so when the featured flight matches a
