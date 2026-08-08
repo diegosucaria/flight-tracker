@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- The map's own aircraft glyph (app.js planeIcon), featured-amber on the UI background -->
+  <rect width="64" height="64" rx="14" fill="#0b0e14"/>
+  <g transform="translate(32 32) rotate(45) scale(2.15)">
+    <path d="M0,-11 L2,-3 L11,2 L11,4 L2,2 L2,7 L4.5,9.5 L4.5,11 L0,9 L-4.5,11 L-4.5,9.5 L-2,7 L-2,2 L-11,4 L-11,2 L-2,-3 Z" fill="#ffd23f"/>
+  </g>
+</svg>
