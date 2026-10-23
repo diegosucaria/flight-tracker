@@ -735,6 +735,12 @@ async function pollCurrent() {
 
 /* ---------- WebSocket (live featured) ---------- */
 let ws = null, wsRetry = 0, wsKeepalive = null, currentTimer = null, acTimer = null;
+// Behind forward-auth an expired sign-in turns every /ws attempt into a redirect, so the page
+// would reconnect forever (and each attempt set a cookie on the auth service). After
+// WS_PROBE_AFTER failures in a row, probe a small same-origin GET before the next try: a
+// redirect or 401/403 means the session is gone -> reload so the normal sign-in flow runs.
+const WS_PROBE_AFTER = 3;
+const WS_RELOAD_KEY = "ws-auth-reload-at";   // sessionStorage: at most one reload per minute
 
 function setActiveRunway(rwy, visible) {
   const el = $("#active-rwy");
@@ -784,10 +790,32 @@ function cleanupWS() {
   if (!acTimer) acTimer = setInterval(pollAircraft, 3000);
 }
 
+async function sessionLost() {
+  try {
+    const r = await fetch("api/diag", { cache: "no-store", redirect: "manual", credentials: "same-origin" });
+    return r.type === "opaqueredirect" || r.status === 0 || r.status === 401 || r.status === 403;
+  } catch (_) { return false; }   // network error / backend down: not an auth problem, keep retrying
+}
+
+function reloadForAuth() {
+  const now = Date.now();
+  try {
+    if (now - Number(sessionStorage.getItem(WS_RELOAD_KEY) || 0) < 60000) return false;
+    sessionStorage.setItem(WS_RELOAD_KEY, String(now));
+  } catch (_) { return false; }    // no storage = no guard -> don't risk a reload loop
+  location.reload();
+  return true;
+}
+
 function scheduleReconnect() {
   wsRetry = Math.min(wsRetry + 1, 6);
   const delay = Math.min(1000 * 2 ** (wsRetry - 1), 15000);
-  setTimeout(connectWS, delay);
+  if (wsRetry < WS_PROBE_AFTER) { setTimeout(connectWS, delay); return; }
+  // probe first; on auth loss reload (and stop reconnecting), otherwise back off as usual
+  sessionLost().then((lost) => {
+    if (lost && reloadForAuth()) return;
+    setTimeout(connectWS, delay);
+  });
 }
 
 /* ---------- config form ---------- */
