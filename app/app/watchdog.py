@@ -29,9 +29,14 @@ async def restart_service(name: str, client: httpx.AsyncClient) -> tuple[bool, s
     Returns ``(attempted, message)``. ``attempted`` is False when the supervisor env is
     absent (local dev) so callers can report 'not on balena' rather than an error.
     """
+    return await service_action("restart", name, client)
+
+
+async def service_action(action: str, name: str, client: httpx.AsyncClient) -> tuple[bool, str]:
+    """``restart`` / ``stop`` / ``start`` a compose service via the supervisor (see above)."""
     if not (SUPERVISOR and API_KEY and APP_ID):
         return (False, "supervisor api unavailable (local dev)")
-    url = f"{SUPERVISOR}/v2/applications/{APP_ID}/restart-service?apikey={API_KEY}"
+    url = f"{SUPERVISOR}/v2/applications/{APP_ID}/{action}-service?apikey={API_KEY}"
     try:
         r = await client.post(url, json={"serviceName": name}, timeout=10)
         return (True, f"HTTP {r.status_code}")

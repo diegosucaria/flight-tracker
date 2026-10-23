@@ -200,6 +200,10 @@ class Config:
     lat: float = field(default_factory=lambda: _env_float("READSB_LAT", "RECEIVER_LAT"))
     lon: float = field(default_factory=lambda: _env_float("READSB_LON", "RECEIVER_LON"))
     use_gps: bool = True                  # receiver location: GPS (gpsd) when available, else lat/lon
+    # USB devices switched off from the UI (their services stay stopped, across reboots too).
+    # Not in _MERGEABLE: POST /api/devices owns them, because a change stops/starts services.
+    sdr_enabled: bool = True              # airband RTL-SDR (airband + airband-speaker services)
+    gps_enabled: bool = True              # USB GPS (gpsd service)
     watch: WatchSector = field(default_factory=WatchSector)
     proximity: ProximitySector = field(default_factory=ProximitySector)  # close "in front of me" override zone
     select_rule: str = "lowest_closest"   # lowest_closest | closest | strongest

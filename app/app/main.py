@@ -35,6 +35,7 @@ from .selector import annotate, classify, pick_featured
 from .gps import GpsReader
 from .history import History
 from .watchdog import FeedWatchdog, restart_service
+from . import devices
 
 AIRCRAFT_JSON_URL = os.environ.get(
     "AIRCRAFT_JSON_URL", "http://ultrafeeder/data/aircraft.json")
@@ -655,10 +656,11 @@ async def lifespan(app: FastAPI):
     active_runway_id = active_runway(list(_recent_runways))
     task = asyncio.create_task(poll_loop())
     gps_task = asyncio.create_task(gps.run())   # live receiver location from gpsd (if present)
+    dev_task = asyncio.create_task(devices.enforce_loop(cfg))   # keep UI-switched-off devices stopped
     yield
-    task.cancel()
-    gps_task.cancel()
-    for t in (task, gps_task):
+    for t in (task, gps_task, dev_task):
+        t.cancel()
+    for t in (task, gps_task, dev_task):
         with contextlib.suppress(asyncio.CancelledError):
             await t
     with contextlib.suppress(Exception):
@@ -840,6 +842,7 @@ async def get_diag() -> JSONResponse:
         "gps": gps.status(),
         "active_runway": diag.get("active_runway"),
         "receiver": {"lat": _rx[0], "lon": _rx[1], "gps": gps.fix},
+        "devices": devices.states(cfg),
     })
 
 
@@ -876,8 +879,12 @@ async def post_airband_config(request: Request) -> JSONResponse:
     cfg.merge({"airband": body})
     with contextlib.suppress(OSError):
         cfg.save()
-    async with httpx.AsyncClient() as client:
-        result = await apply_airband_config(cfg, client)
+    if cfg.sdr_enabled:
+        async with httpx.AsyncClient() as client:
+            result = await apply_airband_config(cfg, client)
+    else:                         # SDR switched off: save the conf, don't restart (= start) airband
+        write_airband_conf(cfg.render_airband_conf())
+        result = {"ok": True, "restarted": False, "detail": "sdr is off"}
     result["airband"] = cfg.to_dict()["airband"]   # echo normalized state back to UI
     return JSONResponse(result)
 
@@ -899,9 +906,36 @@ async def post_volume(request: Request) -> JSONResponse:
     return JSONResponse({"volume": cfg.volume})
 
 
+@app.post("/api/devices")
+async def post_devices(request: Request) -> JSONResponse:
+    """Switch the airband SDR / USB GPS on or off: body ``{"sdr": false}`` / ``{"gps": true}``.
+
+    Persists the choice, then stops or starts the device's services via the supervisor."""
+    try:
+        body = await request.json()
+    except (ValueError, TypeError):
+        body = {}
+    details, restarted = [], True
+    for name, (flag, _) in devices.DEVICES.items():
+        on = body.get(name) if isinstance(body, dict) else None
+        if not isinstance(on, bool):
+            continue
+        setattr(cfg, flag, on)
+        with contextlib.suppress(OSError):
+            cfg.save()
+        async with httpx.AsyncClient() as client:
+            attempted, msg = await devices.apply(name, on, client)
+        restarted = restarted and attempted
+        details.append(msg)
+    return JSONResponse({"ok": True, "devices": devices.states(cfg),
+                         "restarted": restarted, "detail": "; ".join(details)})
+
+
 @app.post("/api/airband/test-beep")
 async def post_airband_test_beep() -> JSONResponse:
     """Restart the speaker container so it replays its startup test tone."""
+    if not cfg.sdr_enabled:       # a restart would start the speaker the SDR switch stopped
+        return JSONResponse({"ok": False, "restarted": False, "detail": "sdr is off"})
     async with httpx.AsyncClient() as client:
         return JSONResponse(await test_beep(client))
 

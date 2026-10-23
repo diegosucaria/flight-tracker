@@ -1006,6 +1006,10 @@ async function pollDiag() {
       ? `${g.mode === 3 ? "3D" : "2D"}${g.sats != null ? " · " + g.sats + " sats" : ""}`
       : "no fix";
     gps.className = "v " + (d.gps_fix ? "ok" : "bad");
+    if (d.devices) {
+      if (d.devices.gps === false) gps.textContent = "off";
+      renderDevices(d.devices);
+    }
     if (d.receiver)
       $("#d-receiver").textContent = `${(+d.receiver.lat).toFixed(4)}, ${(+d.receiver.lon).toFixed(4)}`
         + (d.receiver.gps ? " (GPS)" : "");
@@ -1015,6 +1019,43 @@ async function pollDiag() {
     $("#d-messages").textContent = "–";
   }
 }
+
+/* ---------- device switches (airband SDR / USB GPS: stop or start their services) ---------- */
+const DEV_LABELS = { sdr: "Airband SDR", gps: "GPS" };
+let devBusy = false;
+function renderDevices(devs) {
+  if (devBusy) return;                      // don't flip a label mid-request
+  for (const [name, on] of Object.entries(devs || {})) {
+    const b = $("#dev-" + name); if (!b) continue;
+    b.dataset.on = on ? "1" : "0";
+    b.textContent = `${DEV_LABELS[name] || name}: ${on ? "on" : "off"} — turn ${on ? "off" : "on"}`;
+  }
+}
+function devNote(m, c) {
+  const e = $("#dev-note"); if (e) { e.textContent = m; e.className = "save-note " + (c || ""); }
+}
+async function toggleDevice(ev) {
+  const b = ev.currentTarget, name = b.dataset.dev, on = b.dataset.on !== "1";
+  devBusy = true;
+  document.querySelectorAll("[data-dev]").forEach((x) => { x.disabled = true; });
+  devNote(`${on ? "Starting" : "Stopping"} ${DEV_LABELS[name]}…`);
+  try {
+    const r = await fetch("api/devices", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ [name]: on }),
+    });
+    if (!r.ok) throw new Error(r.status);
+    const res = await r.json();
+    devBusy = false;
+    renderDevices(res.devices);
+    devNote(res.restarted ? `${DEV_LABELS[name]} ${on ? "on" : "off"}` : "Saved (not on balena: no services to switch)", "ok");
+  } catch (e) { devNote("Switch failed (" + e.message + ")", "err"); }
+  finally {
+    devBusy = false;
+    document.querySelectorAll("[data-dev]").forEach((x) => { x.disabled = false; });
+  }
+}
+document.querySelectorAll("[data-dev]").forEach((b) => b.addEventListener("click", toggleDevice));
 
 /* ---------- airband (tower audio) ---------- */
 const twrAudio = $("#twr-audio"), twrBtn = $("#twr-listen"), twrCard = $("#airband-card");
@@ -1136,7 +1177,8 @@ async function testBeep() {
     const r = await fetch("api/airband/test-beep", { method: "POST" });
     if (!r.ok) throw new Error(r.status);
     const res = await r.json();
-    beepNote(res.restarted ? "Speaker restarting — beep incoming" : "Not on balena (no speaker)", "ok");
+    if (res.detail === "sdr is off") beepNote("Airband SDR is off — turn it on first", "err");
+    else beepNote(res.restarted ? "Speaker restarting — beep incoming" : "Not on balena (no speaker)", "ok");
   } catch (e) { beepNote("Test failed (" + e.message + ")", "err"); }
   finally { setTimeout(() => { if (btn) btn.disabled = false; }, 3000); }
 }
